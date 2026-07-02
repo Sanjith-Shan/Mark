@@ -12,7 +12,10 @@ import re
 
 from ..app import App
 
-DAILY_RSS = "https://trends.google.com/trends/trendingsearches/daily/rss?geo=US"
+# Verified working July 2026; the older /trends/trendingsearches/daily/rss path
+# is kept as a fallback in case of regional differences.
+DAILY_RSS = "https://trends.google.com/trending/rss?geo=US"
+DAILY_RSS_LEGACY = "https://trends.google.com/trends/trendingsearches/daily/rss?geo=US"
 
 _FALLBACK = [
     ("ai tools", 80), ("remote jobs", 74), ("internships 2026", 70),
@@ -44,17 +47,27 @@ def _fetch_pytrends(limit: int) -> list[dict] | None:
 
 
 def _fetch_rss(limit: int) -> list[dict] | None:
-    try:
-        import httpx
+    for url in (DAILY_RSS, DAILY_RSS_LEGACY):
+        try:
+            import httpx
 
-        with httpx.Client(timeout=12) as client:
-            resp = client.get(DAILY_RSS, headers={"User-Agent": "Mozilla/5.0"})
-            resp.raise_for_status()
-        titles = re.findall(r"<title>(.*?)</title>", resp.text, flags=re.DOTALL)
-        # First <title> is the feed name; skip it.
-        topics = [t.strip() for t in titles[1:] if t.strip()][:limit]
-        n = len(topics)
-        return [{"source": "google", "topic": t, "raw_score": float(90 - i * (60 / max(n, 1))),
-                 "metadata": {}} for i, t in enumerate(topics)] or None
-    except Exception:
-        return None
+            with httpx.Client(timeout=12, follow_redirects=True) as client:
+                resp = client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+                resp.raise_for_status()
+            items = re.findall(r"<item>(.*?)</item>", resp.text, flags=re.DOTALL)
+            out = []
+            for i, item in enumerate(items[:limit]):
+                m = re.search(r"<title>(.*?)</title>", item, flags=re.DOTALL)
+                if not m:
+                    continue
+                topic = m.group(1).strip()
+                traffic = re.search(r"<ht:approx_traffic>(.*?)</ht:approx_traffic>", item)
+                meta = {"approx_traffic": traffic.group(1)} if traffic else {}
+                out.append({"source": "google", "topic": topic,
+                            "raw_score": float(90 - i * (60 / max(len(items), 1))),
+                            "metadata": meta})
+            if out:
+                return out
+        except Exception:
+            continue
+    return None

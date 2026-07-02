@@ -99,6 +99,9 @@ def format_trends(trends: list[dict]) -> str:
         score = t.get("trend_score")
         score_s = f" (score {score:.2f})" if isinstance(score, (int, float)) else ""
         lines.append(f"- [{t.get('source', '?')}] {t.get('topic', '')}{score_s}")
+        style = (t.get("style_notes") or "").strip()
+        if style:
+            lines.append(f"  how it's being executed: {style}")
     return "\n".join(lines)
 
 
@@ -201,6 +204,13 @@ Always include `hashtags`, `hook`, `cta`, and `alt_text`."""
 def writer_user(plan) -> str:
     return (f"Write the {plan.content_type}. Topic: {plan.topic}. Angle: {plan.angle}. "
             "Return the full structured draft.")
+
+
+def writer_feedback_section(feedback: list[str]) -> str:
+    notes = "\n".join(f"- {f}" for f in feedback[:6])
+    return ("\n\nDIRECT FEEDBACK FROM THE OWNER (previous drafts were rejected for these "
+            "reasons — do NOT repeat these mistakes, treat them as hard requirements):\n"
+            f"{notes}")
 
 
 def writer_novelty_nudge(similar_caption: str) -> str:

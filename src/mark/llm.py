@@ -28,18 +28,22 @@ T = TypeVar("T", bound=BaseModel)
 EMBED_DIM = 256  # dimension used for the offline hash embedding
 
 # Approximate prices (USD). Kept here as a single source of truth; update freely.
-# Text models priced per 1M tokens (input, output).
+# Text models priced per 1M tokens (input, output). Verified July 2026.
 _TEXT_PRICES = {
+    "gpt-5.5": (5.00, 30.00),
+    "gpt-5.4": (2.50, 15.00),
+    "gpt-5.4-mini": (0.75, 4.50),
+    "gpt-5.4-nano": (0.20, 1.25),
     "gpt-4o": (2.50, 10.00),
     "gpt-4o-mini": (0.15, 0.60),
     "gpt-4.1": (2.00, 8.00),
     "gpt-4.1-mini": (0.40, 1.60),
 }
 _EMBED_PRICE_PER_M = {"text-embedding-3-small": 0.02, "text-embedding-3-large": 0.13}
-_IMAGE_PRICE = {  # per image, rough, by quality
-    "low": 0.02, "medium": 0.06, "high": 0.19,
+_IMAGE_PRICE = {  # per image by quality (gpt-image-1.5, portrait/landscape sizes)
+    "low": 0.013, "medium": 0.05, "high": 0.20,
 }
-_TTS_PRICE_PER_M_CHARS = 15.0  # tts-1-hd, approx
+_TTS_PRICE_PER_M_CHARS = 15.0  # ≈ tts-1 / gpt-4o-mini-tts effective per-char rate
 
 
 class LLM:

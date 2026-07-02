@@ -28,6 +28,8 @@ dependencies = [
     "PyYAML>=6.0",           # Config files
     "python-dotenv>=1.0",    # .env loading (optional — falls back to a tiny parser)
     "pydantic>=2.0",         # Config/data validation
+    "fastapi>=0.110",        # Web app backend
+    "uvicorn>=0.29",         # ASGI server for `mark web`
 ]
 
 [project.optional-dependencies]

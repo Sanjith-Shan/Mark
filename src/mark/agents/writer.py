@@ -31,11 +31,14 @@ def write_content(
     *,
     winner_examples: Optional[list[dict]] = None,
     novelty_similar: Optional[str] = None,
+    user_feedback: Optional[list[str]] = None,
     content_id: Optional[int] = None,
 ) -> ContentDraft:
     winner_examples = winner_examples or []
     system = prompts.writer_system(product, platform, plan, winner_examples)
     user = prompts.writer_user(plan)
+    if user_feedback:
+        user += prompts.writer_feedback_section(user_feedback)
     if novelty_similar:
         user += prompts.writer_novelty_nudge(novelty_similar)
 

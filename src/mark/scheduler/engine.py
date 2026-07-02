@@ -38,7 +38,8 @@ def _safe(fn: Callable, *args, **kwargs) -> None:
 
 def _active_products(app: App) -> list[dict]:
     return [dict(r) for r in db_module.query(
-        app.conn, "SELECT * FROM products WHERE active = 1")]
+        app.conn,
+        "SELECT * FROM products WHERE active = 1 AND COALESCE(archived, 0) = 0")]
 
 
 def _all_products(app: App) -> list[dict]:
@@ -67,10 +68,14 @@ def job_post_platform(app: App, platform: str) -> None:
     cap = app.settings.platform(platform).max_posts_per_day
     if _posts_today(app, platform) >= cap:
         return
+    # Rotate across running campaigns fairly: pick the campaign that has posted
+    # least recently on this platform, oldest approved draft first.
     row = db_module.query_one(
         app.conn,
-        "SELECT * FROM content WHERE status = 'approved' AND platform = ? "
-        "ORDER BY created_at ASC LIMIT 1", (platform,))
+        "SELECT c.* FROM content c JOIN products pr ON pr.id = c.product_id "
+        "WHERE c.status = 'approved' AND c.platform = ? "
+        "AND pr.active = 1 AND COALESCE(pr.archived, 0) = 0 "
+        "ORDER BY c.created_at ASC LIMIT 1", (platform,))
     if not row:
         return
     manager.post_content(app, dict(row))
@@ -112,24 +117,54 @@ def _posts_today(app: App, platform: str) -> int:
 # --------------------------------------------------------------------------- #
 # Scheduler assembly
 # --------------------------------------------------------------------------- #
-def build_scheduler(app: App, llm: LLM):
-    from apscheduler.schedulers.blocking import BlockingScheduler
+def build_scheduler(app: App, llm: LLM, *, blocking: bool = True,
+                    app_factory: Optional[Callable[[], App]] = None):
+    """Assemble the scheduler.
+
+    blocking=True (CLI `mark run`) uses a BlockingScheduler and the given app.
+    blocking=False (web autopilot) uses a BackgroundScheduler; pass app_factory
+    so each job run gets its own App/DB connection (jobs run in worker threads).
+    """
     from apscheduler.triggers.cron import CronTrigger
+
+    if blocking:
+        from apscheduler.schedulers.blocking import BlockingScheduler
+
+        sched = BlockingScheduler(timezone=app.settings.scheduling.timezone)
+    else:
+        from apscheduler.schedulers.background import BackgroundScheduler
+
+        sched = BackgroundScheduler(timezone=app.settings.scheduling.timezone)
 
     tz = app.settings.scheduling.timezone
     sc = app.settings.scheduling
-    sched = BlockingScheduler(timezone=tz)
 
-    sched.add_job(lambda: _safe(job_generate, app, llm),
+    def _job(fn, *, needs_llm: bool = False, extra_args: tuple = ()):
+        """Wrap a job so it acquires (and disposes) its own App when a factory
+        is provided — required for cross-thread SQLite safety."""
+        def run() -> None:
+            if app_factory is not None:
+                a = app_factory()
+                try:
+                    args = (a, LLM(a)) if needs_llm else (a,)
+                    _safe(fn, *args, *extra_args)
+                finally:
+                    a.close()
+            else:
+                args = (app, llm) if needs_llm else (app,)
+                _safe(fn, *args, *extra_args)
+        return run
+
+    sched.add_job(_job(job_generate, needs_llm=True),
                   CronTrigger.from_crontab(sc.content_generation_cron, timezone=tz),
                   id="generate", name="generate drafts")
-    sched.add_job(lambda: _safe(job_collect_analytics, app),
+    sched.add_job(_job(job_collect_analytics),
                   CronTrigger.from_crontab(sc.analytics_collection_cron, timezone=tz),
                   id="analytics", name="collect analytics")
-    sched.add_job(lambda: _safe(job_trends, app, llm),
+    sched.add_job(_job(job_trends, needs_llm=True),
                   CronTrigger.from_crontab(sc.trend_monitoring_cron, timezone=tz),
                   id="trends", name="refresh trends")
-    sched.add_job(lambda: _safe(job_feedback, app, llm),
+    sched.add_job(_job(job_feedback, needs_llm=True),
                   CronTrigger.from_crontab(sc.feedback_loop_cron, timezone=tz),
                   id="feedback", name="feedback loop")
 
@@ -140,7 +175,7 @@ def build_scheduler(app: App, llm: LLM):
         for t in app.settings.platform(platform).optimal_times:
             hour, minute = _parse_hhmm(t)
             sched.add_job(
-                lambda p=platform: _safe(job_post_platform, app, p),
+                _job(job_post_platform, extra_args=(platform,)),
                 CronTrigger(hour=hour, minute=minute, timezone=tz, jitter=jitter),
                 id=f"post-{platform}-{t}", name=f"post {platform} @ {t}",
             )

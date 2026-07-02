@@ -38,7 +38,62 @@ def collect(app: App, product_id: Optional[str] = None,
         m["engagement_rate"] = _engagement_rate(m)
         db_module.insert(app.conn, "metrics", post_id=post["id"], **m)
         out.append({"post_id": post["id"], "platform": post["platform"], **m})
+    collect_comments(app, posts, client=client)
     return out
+
+
+# --------------------------------------------------------------------------- #
+# Comments (fuel for sentiment analysis + the feedback loop)
+# --------------------------------------------------------------------------- #
+def collect_comments(app: App, posts: list[dict],
+                     client: Optional[UploadPostClient] = None) -> int:
+    """Pull comments for posts and store new ones (deduped per post by text).
+
+    Live path: upload-post only exposes comment text for Instagram; other
+    platforms only report counts. Offline path synthesizes plausible comments so
+    the sentiment loop is exercised end-to-end.
+    """
+    client = client or UploadPostClient(app)
+    added = 0
+    for post in posts:
+        if app.is_mock("upload_post") or not post.get("platform_post_id"):
+            fetched = _mock_comments(app, post)
+        else:
+            fetched = client.get_comments(post["platform"], post["platform_post_id"])
+        if not fetched:
+            continue
+        existing = {r["comment_text"] for r in db_module.query(
+            app.conn, "SELECT comment_text FROM comments WHERE post_id = ?", (post["id"],))}
+        for c in fetched:
+            if c["text"] in existing:
+                continue
+            db_module.insert(app.conn, "comments", post_id=post["id"],
+                             comment_text=c["text"], author=c.get("author"),
+                             platform=post["platform"])
+            added += 1
+    return added
+
+
+_MOCK_COMMENT_POOL = [
+    ("this is actually so useful", "positive"), ("okay I need this", "positive"),
+    ("where has this been all my life 😭", "positive"), ("just tried it, works great", "positive"),
+    ("love the idea", "positive"), ("sharing this with my roommate", "positive"),
+    ("is this free?", "neutral"), ("how is this different from the other ones?", "neutral"),
+    ("does it work outside the US?", "neutral"), ("what's the catch", "neutral"),
+    ("seen 100 of these, all the same", "negative"), ("feels like an ad tbh", "negative"),
+    ("tried it, didn't work for me", "negative"),
+]
+
+
+def _mock_comments(app: App, post: dict) -> list[dict]:
+    """Deterministic synthetic comments — mostly none, sometimes a few, weighted
+    positive (matching real engagement distributions)."""
+    prior = db_module.query_one(
+        app.conn, "SELECT COUNT(*) AS n FROM comments WHERE post_id = ?", (post["id"],))
+    rng = random.Random(post["id"] * 7919 + (prior["n"] if prior else 0))
+    n = rng.choice([0, 0, 1, 1, 2, 3])
+    picks = rng.sample(_MOCK_COMMENT_POOL, k=min(n, len(_MOCK_COMMENT_POOL)))
+    return [{"text": text, "author": f"user{rng.randint(100, 9999)}"} for text, _ in picks]
 
 
 def _engagement_rate(m: dict) -> float:
@@ -64,12 +119,18 @@ def _mock_metrics(app: App, post: dict) -> dict:
 
 
 def _parse_metrics(raw: dict, platform: str) -> dict:
-    """Defensively pull metrics out of upload-post's analytics response."""
+    """Defensively pull metrics out of upload-post's analytics response.
+
+    Documented shape: {"platforms": {"<p>": {"post_metrics": {...}}}} — but we
+    tolerate older/other nestings too.
+    """
     block = raw
-    for key in ("results", "analytics", "data", "platforms"):
+    for key in ("platforms", "results", "analytics", "data"):
         if isinstance(raw.get(key), dict):
             block = raw[key].get(platform, raw[key])
             break
+    if isinstance(block, dict) and isinstance(block.get("post_metrics"), dict):
+        block = block["post_metrics"]
 
     def g(*names):
         for n in names:

@@ -45,35 +45,47 @@ def post_content(app: App, content: dict, *, client: Optional[UploadPostClient] 
     title = build_caption(app, content)
     media = db_module.loads(content["media_paths"], []) or []
     ctype = content["content_type"]
+    prod = store.get_product(app.conn, content["product_id"])
 
     # X link strategy: link goes in a reply, never the post body.
     first_comment = None
-    if platform == "x":
-        prod = store.get_product(app.conn, content["product_id"])
-        if prod and prod.get("website_url"):
-            first_comment = prod["website_url"]
+    if platform == "x" and prod and prod.get("website_url"):
+        first_comment = prod["website_url"]
+
+    # Per-platform required params from the campaign (e.g. Reddit subreddit).
+    opts = (db_module.loads(prod.get("platform_options"), {}) or {}) if prod else {}
+    extra = dict(opts.get(platform) or {})
 
     try:
         if ctype == "video":
             if not media:
                 raise RuntimeError("video content has no media file")
-            resp = client.upload_video(media[0], title, [platform], first_comment=first_comment)
+            resp = client.upload_video(media[0], title, [platform],
+                                       first_comment=first_comment, **extra)
         elif ctype in ("image", "carousel"):
             if not media:
                 raise RuntimeError(f"{ctype} content has no media files")
-            resp = client.upload_photo(media, title, [platform], first_comment=first_comment)
+            resp = client.upload_photo(media, title, [platform],
+                                       first_comment=first_comment, **extra)
         else:  # text, thread
-            resp = client.upload_text(title, [platform], first_comment=first_comment)
+            resp = client.upload_text(title, [platform],
+                                      first_comment=first_comment, **extra)
     except Exception as exc:  # noqa: BLE001 - record and continue
         store.set_content_status(app.conn, content["id"], "failed",
-                                 rejection_feedback=f"post error: {exc}")
+                                 error=f"post error: {exc}")
+        db_module.log_activity(app.conn, "post", f"Failed to post #{content['id']} to {platform}: {exc}",
+                               product_id=content["product_id"], content_id=content["id"],
+                               level="error")
         return {"error": str(exc), "request_id": None, "results": {}}
 
     # Record the post + flip status.
     result = resp["results"].get(platform, {})
     store.insert_post(app.conn, content_id=content["id"], platform=platform,
                       platform_post_id=result.get("post_id"), request_id=resp.get("request_id"))
-    store.set_content_status(app.conn, content["id"], "posted", posted_at=_now())
+    store.set_content_status(app.conn, content["id"], "posted", posted_at=_now(), error=None)
+    db_module.log_activity(app.conn, "post", f"Posted {ctype} #{content['id']} to {platform}",
+                           product_id=content["product_id"], content_id=content["id"],
+                           level="success")
     return resp
 
 

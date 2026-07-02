@@ -47,9 +47,13 @@ class UploadPostClient:
         if first_comment:
             data["first_comment"] = first_comment
         if "tiktok" in platforms:
-            data["tiktokPrivacyLevel"] = extra.get(
-                "tiktok_privacy", self.app.settings.platform("tiktok").privacy_level
-                or "PUBLIC_TO_EVERYONE")
+            # Docs name the param privacy_level; older SDK used tiktokPrivacyLevel.
+            # Send both — unknown form fields are ignored server-side.
+            level = extra.get("tiktok_privacy", self.app.settings.platform("tiktok").privacy_level
+                              or "PUBLIC_TO_EVERYONE")
+            data["privacy_level"] = level
+            data["tiktokPrivacyLevel"] = level
+        data.update(_platform_params(platforms, extra))
         files = {"video": (Path(video_path).name, open(video_path, "rb"))}
         return self._post("/upload", data, platforms, files=files)
 
@@ -60,6 +64,7 @@ class UploadPostClient:
         data = {"title": title, "user": self.user}
         if first_comment:
             data["first_comment"] = first_comment
+        data.update(_platform_params(platforms, extra))
         files = [("photos[]", (Path(p).name, open(p, "rb"))) for p in photo_paths]
         return self._post("/upload_photos", data, platforms, files=files)
 
@@ -70,6 +75,7 @@ class UploadPostClient:
         data = {"title": text, "user": self.user}
         if first_comment:
             data["first_comment"] = first_comment
+        data.update(_platform_params(platforms, extra))
         return self._post("/upload_text", data, platforms)
 
     def post_analytics(self, request_id: str) -> dict:
@@ -81,6 +87,33 @@ class UploadPostClient:
         if self.mock:
             return {"profile": self.user, "mock": True}
         return self._get(f"/uploadposts/total-impressions/{self.user}")
+
+    def get_comments(self, platform: str, post_id: str, limit: int = 50) -> list[dict]:
+        """Fetch comments for a post. upload-post only documents this for
+        Instagram; other platforms return []. Normalized: {text, author, ts}."""
+        if self.mock or platform != "instagram" or not post_id:
+            return []
+        try:
+            raw = self._get(f"/uploadposts/comments?platform=instagram"
+                            f"&user={self.user}&post_id={post_id}&limit={min(limit, 50)}")
+        except Exception:
+            return []
+        out = []
+        for c in raw.get("comments", []) or []:
+            if isinstance(c, dict) and c.get("text"):
+                out.append({"text": c["text"],
+                            "author": (c.get("user") or {}).get("username"),
+                            "ts": c.get("timestamp")})
+        return out
+
+    def profile_info(self) -> dict:
+        """Connected social accounts for the configured profile (Settings page)."""
+        if self.mock:
+            return {"username": self.user, "mock": True, "social_accounts": {}}
+        try:
+            return self._get(f"/uploadposts/users/{self.user}")
+        except Exception as exc:  # surface as data, not a crash
+            return {"username": self.user, "error": str(exc), "social_accounts": {}}
 
     # -- transport -------------------------------------------------------- #
     def _headers(self) -> dict:
@@ -127,6 +160,20 @@ class UploadPostClient:
             "results": {p: {"post_id": f"mock_{p}_{uuid.uuid4().hex[:8]}",
                             "status": "success"} for p in platforms},
         }
+
+
+def _platform_params(platforms: list[str], extra: dict) -> dict:
+    """Per-platform required params (from caller-supplied extras).
+
+    Reddit requires a subreddit (and a title, which we always send); Pinterest
+    requires a board id. Callers pull these from the product's platform_options.
+    """
+    out: dict = {}
+    if "reddit" in platforms and extra.get("subreddit"):
+        out["subreddit"] = str(extra["subreddit"]).removeprefix("r/")
+    if "pinterest" in platforms and extra.get("pinterest_board_id"):
+        out["pinterest_board_id"] = extra["pinterest_board_id"]
+    return out
 
 
 def _close_files(files) -> None:

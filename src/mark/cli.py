@@ -486,6 +486,35 @@ def _print_schedule(jobs: list[dict]) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# web
+# --------------------------------------------------------------------------- #
+@app.command()
+def web(
+    ctx: typer.Context,
+    host: str = typer.Option("127.0.0.1", "--host"),
+    port: int = typer.Option(8321, "--port"),
+    autopilot: bool = typer.Option(False, "--autopilot",
+                                   help="Start the autonomous scheduler with the server."),
+    open_browser: bool = typer.Option(True, "--open/--no-open",
+                                      help="Open the app in your browser."),
+):
+    """Launch the Mark web app (dashboard, campaigns, content studio)."""
+    from .web import server
+
+    state: Ctx = ctx.obj
+    url = f"http://{host}:{port}"
+    console.print(f"[bold green]Mark web[/] → [link={url}]{url}[/link]"
+                  + ("  [dim](autopilot on)[/]" if autopilot else ""))
+    if open_browser:
+        import threading
+        import webbrowser
+
+        threading.Timer(1.2, lambda: webbrowser.open(url)).start()
+    server.serve(home=state.home, host=host, port=port,
+                 force_mock=state.dry_run, autopilot=autopilot)
+
+
+# --------------------------------------------------------------------------- #
 # status
 # --------------------------------------------------------------------------- #
 @app.command()

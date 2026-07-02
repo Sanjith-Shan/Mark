@@ -38,8 +38,10 @@ def upsert_product(conn: sqlite3.Connection, p: ProductConfig, active: bool = Tr
     return p.id
 
 
-def list_products(conn: sqlite3.Connection) -> list[dict]:
-    return [dict(r) for r in db_module.query(conn, "SELECT * FROM products ORDER BY created_at")]
+def list_products(conn: sqlite3.Connection, include_archived: bool = False) -> list[dict]:
+    where = "" if include_archived else "WHERE COALESCE(archived, 0) = 0"
+    return [dict(r) for r in db_module.query(
+        conn, f"SELECT * FROM products {where} ORDER BY created_at")]
 
 
 def get_product(conn: sqlite3.Connection, product_id: str) -> Optional[dict]:
@@ -57,8 +59,31 @@ def get_active_product(conn: sqlite3.Connection) -> Optional[dict]:
 
 
 def set_active_product(conn: sqlite3.Connection, product_id: str) -> None:
+    """CLI-style exclusive activation (one campaign selected)."""
     db_module.execute(conn, "UPDATE products SET active = 0", ())
     db_module.execute(conn, "UPDATE products SET active = 1 WHERE id = ?", (product_id,))
+
+
+def set_product_active(conn: sqlite3.Connection, product_id: str, active: bool) -> None:
+    """Per-campaign run toggle — multiple campaigns can run at once (web app)."""
+    db_module.execute(conn, "UPDATE products SET active = ? WHERE id = ?",
+                      (1 if active else 0, product_id))
+
+
+def update_product(conn: sqlite3.Connection, product_id: str, **fields: Any) -> None:
+    if not fields:
+        return
+    cols = list(fields.keys())
+    encoded = [db_module._encode(v) for v in fields.values()]
+    assignments = ", ".join(f"{c} = ?" for c in cols)
+    db_module.execute(conn, f"UPDATE products SET {assignments} WHERE id = ?",
+                      encoded + [product_id])
+
+
+def archive_product(conn: sqlite3.Connection, product_id: str) -> None:
+    """Soft-delete: campaign disappears from lists but content/history is kept."""
+    db_module.execute(conn, "UPDATE products SET active = 0, archived = 1 WHERE id = ?",
+                      (product_id,))
 
 
 def resolve_product(conn: sqlite3.Connection, product_id: Optional[str]) -> Optional[dict]:
@@ -145,3 +170,23 @@ def latest_metric(conn: sqlite3.Connection, post_id: int) -> Optional[dict]:
             (post_id,),
         )
     )
+
+
+def update_content(conn: sqlite3.Connection, content_id: int, **fields: Any) -> None:
+    db_module.update(conn, "content", content_id, **fields)
+
+
+def content_counts(conn: sqlite3.Connection, product_id: Optional[str] = None) -> dict[str, int]:
+    """Content rows per status (queue badges / dashboard tiles)."""
+    where, params = ("WHERE product_id = ?", [product_id]) if product_id else ("", [])
+    rows = db_module.query(
+        conn, f"SELECT status, COUNT(*) AS n FROM content {where} GROUP BY status", params)
+    return {r["status"]: r["n"] for r in rows}
+
+
+def list_activity(conn: sqlite3.Connection, limit: int = 50,
+                  product_id: Optional[str] = None) -> list[dict]:
+    where, params = ("WHERE product_id = ?", [product_id]) if product_id else ("", [])
+    rows = db_module.query(
+        conn, f"SELECT * FROM activity {where} ORDER BY id DESC LIMIT ?", params + [limit])
+    return [dict(r) for r in rows]

@@ -36,12 +36,13 @@ def synthesize(app: App, llm: LLM, text: str, out_path: Path, *,
 
     # OpenAI TTS.
     if not app.is_mock("openai"):
+        model = getattr(app.settings.media, "tts_model", None) or "gpt-4o-mini-tts"
         mp3 = out_path.with_suffix(".mp3")
         with llm.client().audio.speech.with_streaming_response.create(
-            model="tts-1-hd", voice=voice, input=text
+            model=model, voice=voice, input=text
         ) as resp:
             resp.stream_to_file(str(mp3))
-        log_external_cost(app, "openai", "tts", "tts-1-hd", units=len(text),
+        log_external_cost(app, "openai", "tts", model, units=len(text),
                           content_id=content_id, product_id=product_id)
         return mp3, media_duration(mp3) or estimate_duration(text)
 

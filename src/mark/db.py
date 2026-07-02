@@ -73,9 +73,12 @@ CREATE TABLE IF NOT EXISTS comments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     post_id INTEGER NOT NULL REFERENCES posts(id),
     comment_text TEXT NOT NULL,
+    author TEXT,
+    platform TEXT,
     sentiment TEXT,
     sentiment_score REAL,
-    analyzed_at TIMESTAMP
+    analyzed_at TIMESTAMP,
+    collected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS winners (
@@ -140,6 +143,17 @@ CREATE TABLE IF NOT EXISTS insights (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Activity feed: everything the system does, for the web dashboard + audit trail.
+CREATE TABLE IF NOT EXISTS activity (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL,                -- "generate", "post", "approve", "learn", ...
+    message TEXT NOT NULL,
+    product_id TEXT,
+    content_id INTEGER,
+    level TEXT DEFAULT 'info',         -- "info", "success", "error"
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX IF NOT EXISTS idx_content_status ON content(status);
 CREATE INDEX IF NOT EXISTS idx_content_product ON content(product_id);
 CREATE INDEX IF NOT EXISTS idx_metrics_post ON metrics(post_id);
@@ -164,9 +178,41 @@ def connect(db_path: Path | str) -> sqlite3.Connection:
     return conn
 
 
+# Columns added after the original schema shipped. init_db() checks PRAGMA
+# table_info and ALTERs existing databases; fresh databases already have the
+# columns from SCHEMA, so each entry is a no-op there.
+MIGRATIONS: list[tuple[str, str, str]] = [
+    # (table, column, declaration)
+    ("content", "draft", "TEXT"),              # full ContentDraft JSON — editable in the web app
+    ("content", "error", "TEXT"),              # last media/posting error, surfaced in the UI
+    ("content", "scheduled_at", "TIMESTAMP"),  # explicit user-chosen posting time
+    ("products", "archived", "INTEGER DEFAULT 0"),
+    ("products", "platform_options", "TEXT"),  # JSON: {"reddit": {"subreddit": ...}, "pinterest": {"board_id": ...}}
+    ("comments", "author", "TEXT"),
+    ("comments", "platform", "TEXT"),
+    ("comments", "collected_at", "TIMESTAMP"),
+    ("trends", "style_notes", "TEXT"),         # LLM analysis of the trend's format/style/audio
+]
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    for table, column, decl in MIGRATIONS:
+        cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
     conn.commit()
+
+
+def log_activity(conn: sqlite3.Connection, kind: str, message: str,
+                 product_id: Optional[str] = None, content_id: Optional[int] = None,
+                 level: str = "info") -> None:
+    """Append to the activity feed. Never raises — the feed is best-effort."""
+    try:
+        insert(conn, "activity", kind=kind, message=message,
+               product_id=product_id, content_id=content_id, level=level)
+    except Exception:
+        pass
 
 
 # --------------------------------------------------------------------------- #

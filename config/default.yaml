@@ -5,8 +5,8 @@ upload_post:
   profile_username: "my-profile"    # Your upload-post.com profile name
 
 llm:
-  text_model: "gpt-4o"                  # Strategist / writer / analyzer
-  judge_model: "gpt-4o-mini"            # Cheaper model for variant judging / scoring
+  text_model: "gpt-5.4-mini"            # Strategist / writer / analyzer (best value, July 2026)
+  judge_model: "gpt-5.4-nano"           # Cheaper model for variant judging / scoring
   embedding_model: "text-embedding-3-small"
   variants: 1                            # Candidate drafts to generate, then judge (1 = no contest)
   self_critique: true                    # Revise drafts against the anti-slop rules before saving
@@ -58,13 +58,14 @@ platforms:
     hashtag_count: 0
 
 media:
-  image_model: "gpt-image-1"            # OpenAI image model
+  image_model: "gpt-image-1.5"          # OpenAI image model (flagship, July 2026)
   image_quality: "medium"                # "low", "medium", "high"
-  video_model: "fal-ai/kling-video/v3/text-to-video"
-  video_fallback: "fal-ai/wan/v2.6/text-to-video"
+  video_model: "fal-ai/kling-video/v3/standard/text-to-video"   # ~$0.13/s w/ audio — best value
+  video_fallback: "fal-ai/wan/v2.7/text-to-video"               # $0.10/s fallback
   video_duration: 8                      # seconds
   video_resolution: "720p"
   tts_provider: "openai"                 # "openai" or "elevenlabs"
+  tts_model: "gpt-4o-mini-tts"           # ~$0.015/min, supports delivery instructions
   tts_voice: "onyx"
 
 scheduling:

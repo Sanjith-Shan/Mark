@@ -28,8 +28,8 @@ class UploadPostConfig(_Base):
 
 
 class LLMConfig(_Base):
-    text_model: str = "gpt-4o"
-    judge_model: str = "gpt-4o-mini"
+    text_model: str = "gpt-5.4-mini"
+    judge_model: str = "gpt-5.4-nano"
     embedding_model: str = "text-embedding-3-small"
     variants: int = 1
     self_critique: bool = True
@@ -47,13 +47,14 @@ class PlatformConfig(_Base):
 
 
 class MediaConfig(_Base):
-    image_model: str = "gpt-image-1"
+    image_model: str = "gpt-image-1.5"
     image_quality: str = "medium"
-    video_model: str = "fal-ai/kling-video/v3/text-to-video"
-    video_fallback: str = "fal-ai/wan/v2.6/text-to-video"
+    video_model: str = "fal-ai/kling-video/v3/standard/text-to-video"
+    video_fallback: str = "fal-ai/wan/v2.7/text-to-video"
     video_duration: int = 8
     video_resolution: str = "720p"
     tts_provider: str = "openai"
+    tts_model: str = "gpt-4o-mini-tts"
     tts_voice: str = "onyx"
 
 

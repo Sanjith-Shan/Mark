@@ -38,7 +38,7 @@ def gather_context(app: App, llm: LLM, product: dict, platform: str) -> dict:
     winners: list[dict] = []
     bandit_picks: dict = {}
 
-    # Trends (Phase 5) — recent cached trends for this platform/source.
+    # Trends — recent cached trends for this platform/source.
     try:
         from .trends import aggregator
 
@@ -46,7 +46,17 @@ def gather_context(app: App, llm: LLM, product: dict, platform: str) -> dict:
     except Exception:
         trends = []
 
-    # Bandit recommendations (Phase 6).
+    # Past winners — so the strategist sees what has actually worked before it
+    # picks a topic/angle (the writer separately gets plan-similar few-shots).
+    try:
+        from .learning import winners as winners_mod
+
+        winners = winners_mod.retrieve(
+            app, llm, platform, f"{product['name']} {product['description'][:200]}", k=3)
+    except Exception:
+        winners = []
+
+    # Bandit recommendations.
     try:
         from .learning import bandit
 
@@ -55,6 +65,22 @@ def gather_context(app: App, llm: LLM, product: dict, platform: str) -> dict:
         bandit_picks = {}
 
     return {"trends": trends, "winners": winners, "bandit_picks": bandit_picks}
+
+
+def recent_rejection_feedback(app: App, product: dict, platform: str, limit: int = 5) -> list[str]:
+    """The user's recent rejection notes for this product+platform — fed back to
+    the writer so it stops repeating the same mistakes."""
+    from . import db as db_module
+
+    rows = db_module.query(
+        app.conn,
+        "SELECT rejection_feedback FROM content "
+        "WHERE product_id = ? AND platform = ? AND status = 'rejected' "
+        "AND rejection_feedback IS NOT NULL AND rejection_feedback != '' "
+        "ORDER BY created_at DESC LIMIT ?",
+        (product["id"], platform, limit),
+    )
+    return [r["rejection_feedback"] for r in rows]
 
 
 def winner_examples(app: App, llm: LLM, product: dict, platform: str, plan) -> list[dict]:
@@ -78,11 +104,20 @@ class Novelty:
 
 
 def check_novelty(app: App, llm: LLM, product: dict, platform: str, draft) -> Novelty:
-    """Reject content that's too similar to recent posts (audience fatigue)."""
+    """Reject content that's too similar to recent posts (audience fatigue).
+
+    Checked across ALL campaigns on this platform, not just this product's own
+    history — concurrent campaigns must each produce unique content, never the
+    same post with a different logo.
+    """
     lookback = app.settings.llm.novelty_lookback
     threshold = app.settings.llm.novelty_threshold
-    recent = store.list_content(app.conn, product_id=product["id"], limit=lookback)
+    recent = store.list_content(app.conn, limit=lookback * 2)
     recent = [r for r in recent if r["platform"] == platform and (r["caption"] or "").strip()]
+    # Keep this product's own history first (most relevant), then other campaigns.
+    own = [r for r in recent if r["product_id"] == product["id"]][:lookback]
+    others = [r for r in recent if r["product_id"] != product["id"]][:lookback]
+    recent = own + others
     if not recent:
         return Novelty(ok=True, max_sim=0.0)
 
@@ -110,13 +145,15 @@ def generate_one(app: App, llm: LLM, product: dict, platform: str) -> dict:
     )
 
     examples = winner_examples(app, llm, product, platform, plan)
-    draft = writer.write_content(app, llm, product, platform, plan, winner_examples=examples)
+    feedback = recent_rejection_feedback(app, product, platform)
+    draft = writer.write_content(app, llm, product, platform, plan,
+                                 winner_examples=examples, user_feedback=feedback)
 
     # Novelty guard — one regeneration attempt with a "make it different" nudge.
     novelty = check_novelty(app, llm, product, platform, draft)
     if not novelty.ok:
         draft = writer.write_content(app, llm, product, platform, plan,
-                                     winner_examples=examples,
+                                     winner_examples=examples, user_feedback=feedback,
                                      novelty_similar=novelty.similar_caption)
         novelty = check_novelty(app, llm, product, platform, draft)
 
@@ -128,12 +165,14 @@ def generate_one(app: App, llm: LLM, product: dict, platform: str) -> dict:
     }
 
     # Save the draft FIRST (spec: content is always reviewable; also gives us an id
-    # to namespace media files under).
+    # to namespace media files under). The full ContentDraft is persisted so the
+    # web app can edit scripts/prompts/slides and regenerate media later.
     content_id = store.insert_content(
         app.conn,
         product_id=product["id"], platform=platform, content_type=plan.content_type,
         caption=draft.caption, hashtags=draft.hashtags, hook=draft.hook,
         media_paths=[], media_urls=[], strategy_context=strategy_context, status="draft",
+        draft=draft.model_dump(),
     )
 
     # Media generation with the spec-mandated fallback (video fails → try image).
@@ -144,7 +183,97 @@ def generate_one(app: App, llm: LLM, product: dict, platform: str) -> dict:
         media_urls=media["media_urls"],
     )
 
+    from . import db as db_module
+
+    db_module.log_activity(app.conn, "generate",
+                           f"Drafted {plan.content_type} for {platform}: “{draft.hook}”",
+                           product_id=product["id"], content_id=content_id)
     _maybe_auto_approve(app, content_id, plan.content_type)
+    return store.get_content(app.conn, content_id)
+
+
+# --------------------------------------------------------------------------- #
+# Editing / regeneration (used by the web app)
+# --------------------------------------------------------------------------- #
+def _plan_from_content(content: dict):
+    """Reconstruct a ContentPlan from a stored content row."""
+    from . import db as db_module
+    from .schemas import ContentPlan
+
+    sc = db_module.loads(content.get("strategy_context"), {}) or {}
+    return ContentPlan(
+        platform=content["platform"], content_type=content["content_type"],
+        topic=sc.get("topic", ""), angle=sc.get("angle", ""),
+        hook_style=sc.get("hook_style", "question"), tone=sc.get("tone", "relatable"),
+        trend_tie_in=sc.get("trend_tie_in"), reasoning=sc.get("reasoning", ""),
+    )
+
+
+def _draft_from_content(content: dict):
+    """Rebuild the ContentDraft from a stored row (draft JSON + edited columns)."""
+    from . import db as db_module
+    from .schemas import ContentDraft
+
+    raw = db_module.loads(content.get("draft"), {}) or {}
+    draft = ContentDraft.model_validate(raw) if raw else ContentDraft(
+        caption=content["caption"] or "", hashtags=[], hook=content["hook"] or "")
+    # The caption/hook/hashtags columns are the source of truth (user-editable).
+    draft.caption = content["caption"] or draft.caption
+    draft.hook = content["hook"] or draft.hook
+    draft.hashtags = db_module.loads(content.get("hashtags"), draft.hashtags) or []
+    return draft
+
+
+def regenerate_media(app: App, llm: LLM, content_id: int) -> dict:
+    """Re-run media generation for a content row using its (possibly edited)
+    stored draft — e.g. after the user tweaks the image prompt or script."""
+    content = store.get_content(app.conn, content_id)
+    if not content:
+        raise ValueError(f"content {content_id} not found")
+    product = store.get_product(app.conn, content["product_id"])
+    plan = _plan_from_content(content)
+    draft = _draft_from_content(content)
+
+    media = _produce_media_with_fallback(app, llm, product, content_id, plan, draft)
+    store.update_content(app.conn, content_id,
+                         content_type=plan.content_type,
+                         media_paths=media["media_paths"], media_urls=media["media_urls"],
+                         error=None)
+    from . import db as db_module
+
+    db_module.log_activity(app.conn, "media",
+                           f"Regenerated media for content #{content_id}",
+                           product_id=product["id"], content_id=content_id)
+    return store.get_content(app.conn, content_id)
+
+
+def rewrite_content(app: App, llm: LLM, content_id: int,
+                    instruction: Optional[str] = None) -> dict:
+    """Rewrite a draft's copy (optionally steered by a user instruction), keeping
+    the same plan. Media is NOT regenerated automatically — the caller decides."""
+    content = store.get_content(app.conn, content_id)
+    if not content:
+        raise ValueError(f"content {content_id} not found")
+    product = store.get_product(app.conn, content["product_id"])
+    platform = content["platform"]
+    plan = _plan_from_content(content)
+
+    examples = winner_examples(app, llm, product, platform, plan)
+    feedback = recent_rejection_feedback(app, product, platform)
+    if instruction:
+        feedback = [instruction] + feedback
+    draft = writer.write_content(app, llm, product, platform, plan,
+                                 winner_examples=examples, user_feedback=feedback)
+
+    store.update_content(app.conn, content_id,
+                         caption=draft.caption, hashtags=draft.hashtags, hook=draft.hook,
+                         draft=draft.model_dump())
+    from . import db as db_module
+
+    db_module.log_activity(app.conn, "rewrite",
+                           f"Rewrote copy for content #{content_id}"
+                           + (f" — “{instruction[:60]}”" if instruction else ""),
+                           product_id=product["id"], content_id=content_id)
     return store.get_content(app.conn, content_id)
 
 
