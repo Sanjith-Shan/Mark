@@ -6,16 +6,16 @@ import { Trend } from "../types";
 import { Card, Empty, Pill, pct, timeAgo } from "../components/ui";
 
 export default function Trends() {
-  const { campaigns, jobs, runJob } = useGlobal();
+  const { campaigns, jobsDoneVersion, runJob } = useGlobal();
   const [campaign, setCampaign] = useState("");
   const [trends, setTrends] = useState<Trend[]>([]);
 
   const load = () => api.get<Trend[]>("/api/trends?limit=30").then(setTrends).catch(() => {});
   useEffect(() => { load(); }, []);
   useEffect(() => {
-    // reload once a trends refresh job finishes
-    if (jobs.some((j) => j.status === "done")) load();
-  }, [jobs]);
+    // reload once a trends refresh job finishes (edge-triggered)
+    if (jobsDoneVersion > 0) load();
+  }, [jobsDoneVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <>

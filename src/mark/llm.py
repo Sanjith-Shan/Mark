@@ -88,7 +88,8 @@ class LLM:
 
         def _call():
             return self.client().beta.chat.completions.parse(
-                model=model, messages=messages, response_format=schema, temperature=temperature
+                model=model, messages=messages, response_format=schema,
+                **_sampling_kwargs(model, temperature),
             )
 
         completion = _retry(_call)
@@ -125,7 +126,7 @@ class LLM:
 
         def _call():
             return self.client().chat.completions.create(
-                model=model, messages=messages, temperature=temperature
+                model=model, messages=messages, **_sampling_kwargs(model, temperature)
             )
 
         completion = _retry(_call)
@@ -214,6 +215,13 @@ def log_external_cost(app: App, provider: str, operation: str, model: str,
         )
     except Exception:
         pass
+
+
+def _sampling_kwargs(model: str, temperature: float) -> dict:
+    """GPT-5-family (reasoning) models reject non-default temperature — omit it."""
+    if (model or "").startswith(("gpt-5", "o1", "o3", "o4")):
+        return {}
+    return {"temperature": temperature}
 
 
 # --------------------------------------------------------------------------- #

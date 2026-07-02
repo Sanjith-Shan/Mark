@@ -13,7 +13,7 @@ from .. import prompts
 from ..analytics import collector
 from ..app import App
 from ..llm import LLM
-from ..schemas import EngagementInsights
+from ..schemas import EngagementInsights, EngagementInsightsWire
 
 
 def analyze(app: App, llm: LLM, product: dict, days: int = 14,
@@ -21,13 +21,17 @@ def analyze(app: App, llm: LLM, product: dict, days: int = 14,
     perf = collector.recent_performance(app, product_id=product["id"], days=days)
     table = _performance_table(perf)
 
-    return llm.parse(
+    # The wire schema avoids dict[str, str] fields, which OpenAI's strict
+    # structured-output mode rejects (free-form additionalProperties).
+    wire = llm.parse(
         prompts.analyzer_system(product),
         prompts.analyzer_user(table, sentiment_summary or "n/a"),
-        EngagementInsights,
+        EngagementInsightsWire,
         model=app.settings.llm.text_model, temperature=0.4, product_id=product["id"],
-        mock_factory=lambda: _mock_insights(app, product, perf, sentiment_summary),
+        mock_factory=lambda: EngagementInsightsWire.from_insights(
+            _mock_insights(app, product, perf, sentiment_summary)),
     )
+    return wire.to_insights()
 
 
 def _performance_table(perf: list[dict]) -> str:

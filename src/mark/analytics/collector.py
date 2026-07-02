@@ -8,8 +8,11 @@ to optimize against. Either way we compute ``engagement_rate`` and append a row 
 
 from __future__ import annotations
 
+import logging
 import random
 from typing import Optional
+
+log = logging.getLogger("mark.analytics")
 
 from .. import db as db_module
 from .. import store
@@ -30,11 +33,19 @@ def collect(app: App, product_id: Optional[str] = None,
     client = UploadPostClient(app)
     out = []
     for post in posts:
-        if app.is_mock("upload_post") or not post.get("request_id"):
+        rid = post.get("request_id") or ""
+        # Posts made offline carry "mock-…" ids the real API doesn't know;
+        # keep synthesizing metrics for them even after keys are added.
+        if app.is_mock("upload_post") or not rid or rid.startswith("mock-"):
             m = _mock_metrics(app, post)
         else:
-            raw = client.post_analytics(post["request_id"])
-            m = _parse_metrics(raw, post["platform"])
+            try:
+                raw = client.post_analytics(rid)
+                m = _parse_metrics(raw, post["platform"])
+            except Exception as exc:  # one bad post must not abort the sweep
+                log.warning("analytics fetch failed for post %s (request_id=%s): %s",
+                            post["id"], rid, exc)
+                continue
         m["engagement_rate"] = _engagement_rate(m)
         db_module.insert(app.conn, "metrics", post_id=post["id"], **m)
         out.append({"post_id": post["id"], "platform": post["platform"], **m})

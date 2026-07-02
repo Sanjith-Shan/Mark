@@ -107,7 +107,8 @@ def get_content(conn: sqlite3.Connection, content_id: int) -> Optional[dict]:
 
 
 def list_content(conn: sqlite3.Connection, status: Optional[str] = None,
-                 product_id: Optional[str] = None, limit: int = 100) -> list[dict]:
+                 product_id: Optional[str] = None, platform: Optional[str] = None,
+                 limit: int = 100) -> list[dict]:
     clauses, params = [], []
     if status:
         clauses.append("status = ?")
@@ -115,6 +116,9 @@ def list_content(conn: sqlite3.Connection, status: Optional[str] = None,
     if product_id:
         clauses.append("product_id = ?")
         params.append(product_id)
+    if platform:
+        clauses.append("platform = ?")
+        params.append(platform)
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     rows = db_module.query(
         conn, f"SELECT * FROM content {where} ORDER BY created_at DESC LIMIT ?",

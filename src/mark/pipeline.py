@@ -52,7 +52,8 @@ def gather_context(app: App, llm: LLM, product: dict, platform: str) -> dict:
         from .learning import winners as winners_mod
 
         winners = winners_mod.retrieve(
-            app, llm, platform, f"{product['name']} {product['description'][:200]}", k=3)
+            app, llm, platform, f"{product['name']} {product['description'][:200]}",
+            k=3, product_id=product["id"])
     except Exception:
         winners = []
 
@@ -88,7 +89,8 @@ def winner_examples(app: App, llm: LLM, product: dict, platform: str, plan) -> l
     try:
         from .learning import winners as winners_mod
 
-        return winners_mod.retrieve(app, llm, platform, f"{plan.topic} {plan.angle}", k=4)
+        return winners_mod.retrieve(app, llm, platform, f"{plan.topic} {plan.angle}",
+                                    k=4, product_id=product["id"])
     except Exception:
         return []
 
@@ -112,8 +114,8 @@ def check_novelty(app: App, llm: LLM, product: dict, platform: str, draft) -> No
     """
     lookback = app.settings.llm.novelty_lookback
     threshold = app.settings.llm.novelty_threshold
-    recent = store.list_content(app.conn, limit=lookback * 2)
-    recent = [r for r in recent if r["platform"] == platform and (r["caption"] or "").strip()]
+    recent = store.list_content(app.conn, platform=platform, limit=lookback * 2)
+    recent = [r for r in recent if (r["caption"] or "").strip()]
     # Keep this product's own history first (most relevant), then other campaigns.
     own = [r for r in recent if r["product_id"] == product["id"]][:lookback]
     others = [r for r in recent if r["product_id"] != product["id"]][:lookback]

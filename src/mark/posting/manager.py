@@ -27,9 +27,17 @@ def _now() -> str:
 def build_caption(app: App, content: dict) -> str:
     caption = (content["caption"] or "").strip()
     if content["platform"] in HASHTAG_PLATFORMS:
-        tags = db_module.loads(content["hashtags"], []) or []
-        if tags:
-            caption = f"{caption}\n\n{' '.join(tags)}".strip()
+        from ..agents.writer import LENGTH_CAPS
+
+        tags = list(db_module.loads(content["hashtags"], []) or [])
+        cap = LENGTH_CAPS.get(content["platform"])
+        # Shed trailing hashtags until the combined post fits the platform cap
+        # (the copy is capped at write time, but hashtags are appended here).
+        while tags:
+            combined = f"{caption}\n\n{' '.join(tags)}".strip()
+            if cap is None or len(combined) <= cap:
+                return combined
+            tags.pop()
     return caption
 
 
@@ -78,8 +86,20 @@ def post_content(app: App, content: dict, *, client: Optional[UploadPostClient] 
                                level="error")
         return {"error": str(exc), "request_id": None, "results": {}}
 
-    # Record the post + flip status.
+    # upload-post returns 200 with per-platform outcomes — a rejected upload
+    # (disconnected account, platform policy) arrives as status="failed" here.
     result = resp["results"].get(platform, {})
+    if result.get("status") == "failed":
+        err = result.get("error") or "platform rejected the upload"
+        store.set_content_status(app.conn, content["id"], "failed",
+                                 error=f"{platform}: {err}")
+        db_module.log_activity(app.conn, "post",
+                               f"Failed to post #{content['id']} to {platform}: {err}",
+                               product_id=content["product_id"], content_id=content["id"],
+                               level="error")
+        return {**resp, "error": err}
+
+    # Record the post + flip status.
     store.insert_post(app.conn, content_id=content["id"], platform=platform,
                       platform_post_id=result.get("post_id"), request_id=resp.get("request_id"))
     store.set_content_status(app.conn, content["id"], "posted", posted_at=_now(), error=None)

@@ -68,8 +68,11 @@ def _background(app, llm, product, content_id, plan, draft, out_dir, duration):
             path = _ai_video(app, prompt, duration, out_dir / f"{content_id}_broll.mp4",
                              content_id, product["id"])
             return path, True
-        except Exception:
-            pass  # fall through to image background
+        except Exception as exc:  # fall through to image background — but say so
+            import logging
+
+            logging.getLogger("mark.video").warning(
+                "fal video generation failed, using image background: %s", exc)
     # Image background (works offline).
     img = out_dir / f"{content_id}_bg.png"
     images.generate_image(app, llm, prompt, img, size="1024x1536",
@@ -87,8 +90,9 @@ def _ai_video(app: App, prompt: str, duration: float, out_path: Path,
     seconds = int(min(max(duration, 3), 10))
 
     def _run(m):
+        # fal model schemas define duration as a string enum ("3".."15").
         return fal_client.subscribe(
-            m, arguments={"prompt": prompt, "duration": seconds, "aspect_ratio": "9:16"})
+            m, arguments={"prompt": prompt, "duration": str(seconds), "aspect_ratio": "9:16"})
 
     try:
         result = _run(model)

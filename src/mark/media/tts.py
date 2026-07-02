@@ -59,8 +59,11 @@ def _elevenlabs(app: App, text: str, out_path: Path, voice: str,
                 content_id, product_id) -> tuple[Path, float]:
     import httpx
 
-    # ElevenLabs multilingual v2; `voice` may be a voice id.
-    voice_id = voice if voice and voice[0].isalnum() and len(voice) > 10 else "Rachel"
+    # ElevenLabs multilingual v2; `voice` may be a voice id. The API requires a
+    # voice ID (not a name) — fall back to Rachel's actual ID when the config
+    # holds an OpenAI-style voice name like "onyx".
+    DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"  # Rachel
+    voice_id = voice if voice and voice[0].isalnum() and len(voice) > 10 else DEFAULT_VOICE_ID
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
     headers = {"xi-api-key": app.keys.elevenlabs, "Content-Type": "application/json"}
     payload = {"text": text, "model_id": "eleven_multilingual_v2"}

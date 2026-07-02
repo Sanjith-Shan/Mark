@@ -14,6 +14,8 @@ interface GlobalState {
   refreshCampaigns: () => void;
   /** bumps whenever a content event arrives — pages listen to reload lists */
   contentVersion: number;
+  /** bumps once each time a job finishes (done or failed) — edge-triggered */
+  jobsDoneVersion: number;
   runJob: (start: () => Promise<{ job_id: string }>) => Promise<void>;
   toast: (msg: string, level?: "info" | "error") => void;
 }
@@ -28,8 +30,10 @@ export function GlobalProvider({ children }: { children: ReactNode }) {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [contentVersion, setContentVersion] = useState(0);
+  const [jobsDoneVersion, setJobsDoneVersion] = useState(0);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const toastId = useRef(0);
+  const jobStatusRef = useRef<Map<string, string>>(new Map());
 
   const refreshStatus = useCallback(() => {
     api.get<Status>("/api/status").then(setStatus).catch(() => {});
@@ -49,13 +53,17 @@ export function GlobalProvider({ children }: { children: ReactNode }) {
     refreshCampaigns();
     api.get<Job[]>("/api/jobs").then(setJobs).catch(() => {});
     const off = subscribeEvents((e: MarkEvent) => {
-      if (e.kind === "job") {
-        const job = e as unknown as Job & MarkEvent;
+      if (e.kind === "job" && e.job) {
+        const job = e.job as Job;
+        const prevStatus = jobStatusRef.current.get(job.id);
+        jobStatusRef.current.set(job.id, job.status);
         setJobs((prev) => {
           const rest = prev.filter((j) => j.id !== job.id);
-          return [{ ...(job as unknown as Job) }, ...rest].slice(0, 30);
+          return [job, ...rest].slice(0, 30);
         });
-        if (job.status === "done" || job.status === "failed") {
+        // Edge-trigger: fire once per job completion, not on every progress tick.
+        if ((job.status === "done" || job.status === "failed") && prevStatus !== job.status) {
+          setJobsDoneVersion((v) => v + 1);
           refreshStatus();
         }
       } else if (e.kind === "content") {
@@ -77,8 +85,10 @@ export function GlobalProvider({ children }: { children: ReactNode }) {
   }, [toast]);
 
   const value = useMemo(
-    () => ({ status, campaigns, jobs, refreshStatus, refreshCampaigns, contentVersion, runJob, toast }),
-    [status, campaigns, jobs, refreshStatus, refreshCampaigns, contentVersion, runJob, toast],
+    () => ({ status, campaigns, jobs, refreshStatus, refreshCampaigns,
+             contentVersion, jobsDoneVersion, runJob, toast }),
+    [status, campaigns, jobs, refreshStatus, refreshCampaigns,
+     contentVersion, jobsDoneVersion, runJob, toast],
   );
 
   return (

@@ -43,16 +43,24 @@ def _posted_with_metrics(app: App, product_id: str, days: int) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def _nearest_time(posted_at: Optional[str], times: list[str]) -> Optional[str]:
+def _nearest_time(posted_at: Optional[str], times: list[str],
+                  tz_name: str = "UTC") -> Optional[str]:
+    """Map a UTC posted_at to the nearest configured (local wall-clock) slot."""
     if not posted_at or not times:
         return times[0] if times else None
     try:
-        hour = int(str(posted_at)[11:13])
-    except (ValueError, IndexError):
+        from zoneinfo import ZoneInfo
+
+        dt = datetime.strptime(str(posted_at)[:19], "%Y-%m-%d %H:%M:%S") \
+            .replace(tzinfo=timezone.utc)
+        hour = dt.astimezone(ZoneInfo(tz_name)).hour
+    except Exception:
         return times[0]
+
     def to_h(t: str) -> int:
         return int(t.split(":")[0])
-    return min(times, key=lambda t: abs(to_h(t) - hour))
+    # Circular distance so 23:00 is 2h from 01:00, not 22h.
+    return min(times, key=lambda t: min(abs(to_h(t) - hour), 24 - abs(to_h(t) - hour)))
 
 
 def run(app: App, llm: LLM, product: dict, days: int = 7, collect: bool = True) -> dict:
@@ -70,7 +78,8 @@ def run(app: App, llm: LLM, product: dict, days: int = 7, collect: bool = True) 
         for p in posts:
             reward = min((p["engagement_rate"] or 0.0) / baseline, 1.0)
             post_time = _nearest_time(p["posted_at"],
-                                      app.settings.platform(p["platform"]).optimal_times)
+                                      app.settings.platform(p["platform"]).optimal_times,
+                                      tz_name=app.settings.scheduling.timezone)
             bandit.update_from_content(app, p, reward, post_time=post_time)
             rewards_applied += 1
 

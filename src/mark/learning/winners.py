@@ -72,12 +72,25 @@ def refresh_winners(app: App, llm: LLM, product: dict, top_pct: float = 0.2,
     return inserted
 
 
-def retrieve(app: App, llm: LLM, platform: str, query: str, k: int = 4) -> list[dict]:
-    """Return the top-k most similar winners (prefers same platform)."""
-    rows = db_module.query(
-        app.conn, "SELECT * FROM winners WHERE platform = ?", (platform,))
-    if not rows:
-        rows = db_module.query(app.conn, "SELECT * FROM winners")
+def retrieve(app: App, llm: LLM, platform: str, query: str, k: int = 4,
+             product_id: Optional[str] = None) -> list[dict]:
+    """Return the top-k most similar winners (prefers same platform).
+
+    Pass product_id to keep campaigns' example pools separate — one product's
+    winning copy must never leak into another product's prompts.
+    """
+    if product_id:
+        base = ("SELECT w.* FROM winners w JOIN content c ON c.id = w.content_id "
+                "WHERE c.product_id = ?")
+        rows = db_module.query(app.conn, base + " AND w.platform = ?",
+                               (product_id, platform))
+        if not rows:  # same-product fallback across platforms, never across products
+            rows = db_module.query(app.conn, base, (product_id,))
+    else:
+        rows = db_module.query(
+            app.conn, "SELECT * FROM winners WHERE platform = ?", (platform,))
+        if not rows:
+            rows = db_module.query(app.conn, "SELECT * FROM winners")
     if not rows:
         return []
 

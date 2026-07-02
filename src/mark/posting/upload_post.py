@@ -122,8 +122,10 @@ class UploadPostClient:
     def _post(self, path: str, data: dict, platforms: list[str], files=None) -> dict:
         import httpx
 
-        # upload-post expects repeated platform[] fields.
-        form = list(data.items()) + [("platform[]", _ext_platform(p)) for p in platforms]
+        # upload-post expects repeated platform[] fields; httpx expands a list
+        # value into repeated fields (a list-of-tuples `data` would be treated
+        # as raw content and silently drop `files`).
+        form = {**data, "platform[]": [_ext_platform(p) for p in platforms]}
 
         def _call():
             with httpx.Client(timeout=120) as client:
@@ -198,8 +200,14 @@ def _normalize(raw: dict, platforms: list[str]) -> dict:
         if isinstance(entry, dict):
             post_id = (entry.get("post_id") or entry.get("id")
                        or entry.get("platform_post_id"))
-            status = entry.get("status", "success")
+            # upload-post reports per-platform outcome as a `success` boolean
+            # (with an `error` string), not a `status` field.
+            if "success" in entry:
+                status = "success" if entry.get("success") else "failed"
+            else:
+                status = entry.get("status", "success")
+            error = entry.get("error") or entry.get("message")
         else:
-            post_id, status = None, "success"
-        results[p] = {"post_id": post_id, "status": status}
+            post_id, status, error = None, "success", None
+        results[p] = {"post_id": post_id, "status": status, "error": error}
     return {"request_id": str(request_id), "results": results, "raw": raw}

@@ -33,7 +33,7 @@ interface CommentsResp {
 }
 
 export default function Analytics() {
-  const { campaigns, jobs, runJob } = useGlobal();
+  const { campaigns, jobsDoneVersion, runJob } = useGlobal();
   const [campaign, setCampaign] = useState("");
   const [days, setDays] = useState(30);
   const [data, setData] = useState<AnalyticsResp | null>(null);
@@ -47,8 +47,8 @@ export default function Analytics() {
   useEffect(() => { load(); }, [campaign, days]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     // reload when a job (e.g. analytics collection) finishes
-    if (jobs.some((j) => j.status === "done")) load();
-  }, [jobs]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (jobsDoneVersion > 0) load();
+  }, [jobsDoneVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const series = data?.series ?? [];
   const engagement = pivot(series, "engagement");

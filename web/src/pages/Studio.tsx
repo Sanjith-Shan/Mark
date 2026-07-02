@@ -223,22 +223,26 @@ function Drawer(props: { id: number; initialReject: boolean; onClose: () => void
   const save = async () => {
     if (!detail || !form) return;
     setSaving(true);
+    // Send raw strings — the backend treats null as "not provided", so a
+    // cleared field must go over the wire as "" to actually clear. Hashtags
+    // keep their '#' (posting joins them verbatim into the caption).
     const body: Record<string, unknown> = {
       hook: form.hook,
       caption: form.caption,
-      hashtags: form.hashtags.split(/\s+/).map((t) => t.replace(/^#/, "")).filter(Boolean),
-      cta: form.cta || null,
-      alt_text: form.alt_text || null,
+      hashtags: form.hashtags.split(/\s+/).filter(Boolean)
+        .map((t) => (t.startsWith("#") ? t : `#${t}`)),
+      cta: form.cta,
+      alt_text: form.alt_text,
     };
     if (detail.content_type === "video") {
-      body.script = form.script || null;
-      body.video_prompt = form.video_prompt || null;
-      body.image_prompt = form.image_prompt || null;
+      body.script = form.script;
+      body.video_prompt = form.video_prompt;
+      body.image_prompt = form.image_prompt;
     } else if (detail.content_type === "carousel") {
       body.slide_texts = form.slide_texts;
       body.image_prompts = form.image_prompts;
     } else {
-      body.image_prompt = form.image_prompt || null;
+      body.image_prompt = form.image_prompt;
     }
     try {
       const updated = await api.patch<Content>(`/api/content/${detail.id}`, body);

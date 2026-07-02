@@ -45,7 +45,9 @@ class EventBus:
                 self._subscribers.remove(q)
 
     def publish(self, kind: str, data: dict) -> None:
-        event = {"kind": kind, "ts": _now(), **data}
+        # Envelope keys must win — a job payload carries its own "kind"
+        # ("generate", "post", …) which would otherwise clobber the event kind.
+        event = {**data, "kind": kind, "ts": _now()}
         with self._lock:
             subs = list(self._subscribers)
         for q in subs:
@@ -108,19 +110,19 @@ class JobManager:
             self._order.append(job.id)
             while len(self._order) > self.MAX_JOBS_KEPT:
                 self.jobs.pop(self._order.pop(0), None)
-        self.bus.publish("job", job.to_dict())
+        self.bus.publish("job", {"job": job.to_dict()})
 
         def _run() -> None:
             app = self.runtime.fresh_app()
             llm = LLM(app)
             job.status = "running"
-            self.bus.publish("job", job.to_dict())
+            self.bus.publish("job", {"job": job.to_dict()})
 
             def report(progress: float, message: str = "") -> None:
                 job.progress = max(job.progress, min(progress, 1.0))
                 if message:
                     job.message = message
-                self.bus.publish("job", job.to_dict())
+                self.bus.publish("job", {"job": job.to_dict()})
 
             try:
                 job.result = fn(app, llm, job, report)
@@ -132,7 +134,7 @@ class JobManager:
                 traceback.print_exc()
             finally:
                 job.finished_at = _now()
-                self.bus.publish("job", job.to_dict())
+                self.bus.publish("job", {"job": job.to_dict()})
                 app.close()
 
         self.executor.submit(_run)
@@ -171,17 +173,21 @@ class Autopilot:
         with self._lock:
             if self.running:
                 return
+            from .. import db as db_module
             from ..scheduler import engine
 
+            # This app is only needed to build the schedule; each job run gets
+            # its own App via app_factory. Close it or its connection leaks.
             app = self.runtime.fresh_app()
-            llm = LLM(app)
-            self._sched = engine.build_scheduler(
-                app, llm, blocking=False, app_factory=self.runtime.fresh_app)
-            self._sched.start()
-            self.started_at = _now()
-            from .. import db as db_module
-
-            db_module.log_activity(app.conn, "autopilot", "Autopilot started", level="success")
+            try:
+                self._sched = engine.build_scheduler(
+                    app, LLM(app), blocking=False, app_factory=self.runtime.fresh_app)
+                self._sched.start()
+                self.started_at = _now()
+                db_module.log_activity(app.conn, "autopilot", "Autopilot started",
+                                       level="success")
+            finally:
+                app.close()
             self.bus.publish("autopilot", {"running": True})
 
     def stop(self) -> None:

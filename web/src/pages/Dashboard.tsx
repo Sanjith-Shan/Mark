@@ -20,15 +20,15 @@ const FEED_ICONS: Record<string, string> = {
 };
 
 export default function Dashboard() {
-  const { status, contentVersion, runJob, jobs } = useGlobal();
+  const { status, contentVersion, jobsDoneVersion, runJob } = useGlobal();
   const [ov, setOv] = useState<Overview | null>(null);
 
   const load = () => api.get<Overview>("/api/overview").then(setOv).catch(() => {});
   useEffect(() => { load(); }, [contentVersion]);
   useEffect(() => {
-    // refresh when jobs finish
-    if (jobs.some((j) => j.status === "done")) load();
-  }, [jobs]);
+    // refresh once each time a job finishes (edge-triggered)
+    if (jobsDoneVersion > 0) load();
+  }, [jobsDoneVersion]);
 
   const running = ov?.campaigns.filter((c) => c.active) ?? [];
   const totalViews = ov?.campaigns.reduce((s, c) => s + (c.views_7d ?? 0), 0) ?? 0;

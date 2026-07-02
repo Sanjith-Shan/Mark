@@ -127,14 +127,21 @@ def build_scheduler(app: App, llm: LLM, *, blocking: bool = True,
     """
     from apscheduler.triggers.cron import CronTrigger
 
+    # APScheduler's default misfire_grace_time is 1 second — on a laptop that
+    # sleeps through a cron fire time, the run would be silently discarded.
+    # A 1-hour grace window lets a late wakeup still run each job once;
+    # coalesce collapses multiple missed runs into one.
+    job_defaults = {"misfire_grace_time": 3600, "coalesce": True}
     if blocking:
         from apscheduler.schedulers.blocking import BlockingScheduler
 
-        sched = BlockingScheduler(timezone=app.settings.scheduling.timezone)
+        sched = BlockingScheduler(timezone=app.settings.scheduling.timezone,
+                                  job_defaults=job_defaults)
     else:
         from apscheduler.schedulers.background import BackgroundScheduler
 
-        sched = BackgroundScheduler(timezone=app.settings.scheduling.timezone)
+        sched = BackgroundScheduler(timezone=app.settings.scheduling.timezone,
+                                    job_defaults=job_defaults)
 
     tz = app.settings.scheduling.timezone
     sc = app.settings.scheduling

@@ -65,4 +65,8 @@ def serve(home: Optional[Path] = None, host: str = "127.0.0.1", port: int = 8321
     app = create_app(home=home, force_mock=force_mock)
     if autopilot:
         app.state.runtime.autopilot.start()
-    uvicorn.run(app, host=host, port=port, log_level="info")
+    # Open SSE connections never drain on their own — give uvicorn a short
+    # grace window so Ctrl+C actually stops the server (and still runs the
+    # lifespan shutdown that tears down the Runtime).
+    uvicorn.run(app, host=host, port=port, log_level="info",
+                timeout_graceful_shutdown=3)

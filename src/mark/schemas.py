@@ -74,6 +74,56 @@ class EngagementInsights(BaseModel):
     raw_analysis: str = ""
 
 
+class PlatformPick(BaseModel):
+    platform: str
+    value: str
+
+
+class EngagementInsightsWire(BaseModel):
+    """LLM wire format for EngagementInsights.
+
+    OpenAI strict structured outputs reject free-key dicts (additionalProperties),
+    so the per-platform maps go over the wire as explicit (platform, value) pairs
+    and are converted back with :meth:`to_insights`.
+    """
+
+    top_performing_topics: list[str] = Field(default_factory=list)
+    worst_performing_topics: list[str] = Field(default_factory=list)
+    best_hook_styles: list[str] = Field(default_factory=list)
+    best_content_types: list[PlatformPick] = Field(default_factory=list)
+    best_posting_times: list[PlatformPick] = Field(default_factory=list)
+    audience_sentiment_summary: str = ""
+    recommended_adjustments: list[str] = Field(default_factory=list)
+    raw_analysis: str = ""
+
+    def to_insights(self) -> "EngagementInsights":
+        return EngagementInsights(
+            top_performing_topics=self.top_performing_topics,
+            worst_performing_topics=self.worst_performing_topics,
+            best_hook_styles=self.best_hook_styles,
+            best_content_types={p.platform: p.value for p in self.best_content_types},
+            best_posting_times={p.platform: p.value for p in self.best_posting_times},
+            audience_sentiment_summary=self.audience_sentiment_summary,
+            recommended_adjustments=self.recommended_adjustments,
+            raw_analysis=self.raw_analysis,
+        )
+
+    @classmethod
+    def from_insights(cls, ins: "EngagementInsights") -> "EngagementInsightsWire":
+        return cls(
+            top_performing_topics=ins.top_performing_topics,
+            worst_performing_topics=ins.worst_performing_topics,
+            best_hook_styles=ins.best_hook_styles,
+            best_content_types=[PlatformPick(platform=k, value=v)
+                                for k, v in ins.best_content_types.items()],
+            best_posting_times=[PlatformPick(platform=k, value=v)
+                                for k, v in ins.best_posting_times.items()],
+            audience_sentiment_summary=ins.audience_sentiment_summary,
+            recommended_adjustments=ins.recommended_adjustments,
+            raw_analysis=ins.raw_analysis,
+        )
+
+
 class SentimentResult(BaseModel):
     sentiment: str = "neutral"     # "positive", "negative", "neutral"
     score: float = 0.0             # -1..1

@@ -6,7 +6,7 @@ import { Insights } from "../types";
 import { Card, Empty, Pill, PlatformChip, Stat, pct, timeAgo } from "../components/ui";
 
 export default function Learn() {
-  const { campaigns, jobs, runJob } = useGlobal();
+  const { campaigns, jobsDoneVersion, runJob } = useGlobal();
   const [campaign, setCampaign] = useState("");
   const [data, setData] = useState<Insights | null>(null);
 
@@ -25,8 +25,8 @@ export default function Learn() {
   useEffect(() => { load(); }, [campaign]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     // reload once a learning job finishes
-    if (jobs.some((j) => j.status === "done")) load();
-  }, [jobs]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (jobsDoneVersion > 0) load();
+  }, [jobsDoneVersion]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const payload = data?.insights?.payload;
   const bandit = [...(data?.bandit ?? [])].sort((a, b) => b.avg_reward - a.avg_reward);

@@ -294,6 +294,9 @@ def build_router(rt: Runtime) -> APIRouter:
             v = getattr(body, k)
             if v is not None:
                 fields[k] = v
+        if body.hashtags is not None:  # normalize: posting joins these verbatim
+            fields["hashtags"] = [h if h.startswith("#") else f"#{h}"
+                                  for h in (t.strip() for t in body.hashtags) if h]
         draft = db_module.loads(row.get("draft"), {}) or {}
         draft_changed = False
         for k in ("script", "cta", "alt_text", "image_prompt", "image_prompts",
@@ -651,17 +654,25 @@ def build_router(rt: Runtime) -> APIRouter:
         return job.to_dict()
 
     @r.get("/events")
-    def events(request: Request) -> StreamingResponse:
+    async def events(request: Request) -> StreamingResponse:
         q = rt.bus.subscribe()
 
-        def stream():
+        async def stream():
             import queue as _q
 
+            import anyio
+
+            # Private limiter: a sync generator would pin one token of the
+            # shared 40-token thread pool per connection, starving the whole
+            # API. abandon_on_cancel frees the worker on client disconnect.
+            limiter = anyio.CapacityLimiter(1)
             try:
                 yield "event: hello\ndata: {}\n\n"
                 while True:
                     try:
-                        event = q.get(timeout=15)
+                        event = await anyio.to_thread.run_sync(
+                            lambda: q.get(timeout=15),
+                            limiter=limiter, abandon_on_cancel=True)
                         yield f"data: {json.dumps(event)}\n\n"
                     except _q.Empty:
                         yield ": keepalive\n\n"
