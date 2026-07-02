@@ -220,10 +220,10 @@ def approve(ctx: typer.Context,
             content_id: Optional[int] = typer.Argument(None),
             all_drafts: bool = typer.Option(False, "--all", help="Approve all drafts.")):
     """Approve content for posting."""
-    from datetime import datetime
+    from datetime import datetime, timezone
 
     a = _app(ctx)
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     if all_drafts:
         rows = store.list_content(a.conn, status="draft", limit=1000)
         for r in rows:

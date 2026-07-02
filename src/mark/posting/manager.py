@@ -8,7 +8,7 @@ comment / reply instead.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from .. import db as db_module
@@ -21,7 +21,7 @@ HASHTAG_PLATFORMS = {"tiktok", "instagram", "x", "linkedin", "youtube", "pintere
 
 
 def _now() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def build_caption(app: App, content: dict) -> str:

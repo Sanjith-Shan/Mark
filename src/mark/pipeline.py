@@ -11,7 +11,7 @@ self-improvement loop in later phases touches a single function.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 import numpy as np
@@ -25,7 +25,7 @@ from .vectors import cosine_to_matrix
 
 
 def _now() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
 # --------------------------------------------------------------------------- #

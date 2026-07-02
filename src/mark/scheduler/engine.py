@@ -110,7 +110,7 @@ def _posts_today(app: App, platform: str) -> int:
     row = db_module.query_one(
         app.conn,
         "SELECT COUNT(*) AS n FROM posts WHERE platform = ? "
-        "AND date(posted_at) = date('now', 'localtime')", (platform,))
+        "AND date(posted_at, 'localtime') = date('now', 'localtime')", (platform,))
     return row["n"] if row else 0
 
 

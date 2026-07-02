@@ -10,7 +10,7 @@ The bandit learns which choices work for THIS audience on EACH platform.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 import numpy as np
@@ -23,7 +23,7 @@ _rng = np.random.default_rng()
 
 
 def _now() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def candidate_values(app: App, platform: str) -> dict[str, list[str]]:

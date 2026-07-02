@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from .. import db as db_module
@@ -99,7 +99,7 @@ def run(app: App, llm: LLM, product: dict, days: int = 7, collect: bool = True) 
         "media_pruned": pruned,
         "sentiment": sentiment_summary,
         "insights": insights.model_dump(),
-        "ran_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "ran_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
     }
     return report
 

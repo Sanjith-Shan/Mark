@@ -312,12 +312,13 @@ def build_router(rt: Runtime) -> APIRouter:
 
     @r.post("/content/{content_id}/approve")
     def approve(content_id: int) -> dict:
-        from datetime import datetime
+        from datetime import datetime, timezone
 
         app = rt.app()
         row = get_content_or_404(content_id)
-        store.set_content_status(app.conn, content_id, "approved",
-                                 approved_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        store.set_content_status(
+            app.conn, content_id, "approved",
+            approved_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"))
         db_module.log_activity(app.conn, "approve", f"Approved content #{content_id}",
                                product_id=row["product_id"], content_id=content_id,
                                level="success")

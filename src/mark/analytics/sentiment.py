@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from .. import db as db_module
@@ -17,7 +17,7 @@ _NEGATIVE = {"hate", "bad", "worst", "terrible", "scam", "broken", "useless",
 
 
 def _now() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def classify_one(app: App, llm: LLM, text: str) -> SentimentResult:

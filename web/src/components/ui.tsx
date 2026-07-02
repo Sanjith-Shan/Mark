@@ -83,7 +83,10 @@ export function Switch(props: { checked: boolean; onChange: (v: boolean) => void
 }
 
 export function timeAgo(ts: string): string {
-  const t = new Date(ts.includes("T") ? ts : ts.replace(" ", "T"));
+  // Server timestamps are UTC ("YYYY-MM-DD HH:MM:SS") — parse them as such.
+  let iso = ts.includes("T") ? ts : ts.replace(" ", "T");
+  if (!/Z|[+-]\d{2}:?\d{2}$/.test(iso)) iso += "Z";
+  const t = new Date(iso);
   const secs = Math.max(0, (Date.now() - t.getTime()) / 1000);
   if (secs < 60) return "just now";
   if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
