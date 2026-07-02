@@ -101,9 +101,29 @@ def main(home: Path) -> None:
     store.set_content_status(app.conn, row["id"], "rejected",
                              rejection_feedback="too generic — needs a concrete student story")
 
-    # Metrics over "time": collect several rounds so charts have shape.
-    for _ in range(4):
+    # Backdate posts across the past ~10 days so charts show a real time series.
+    rows = app.conn.execute("SELECT id FROM posts ORDER BY id").fetchall()
+    for i, row in enumerate(rows):
+        days_ago = (len(rows) - 1 - i) % 10
+        app.conn.execute(
+            "UPDATE posts SET posted_at = datetime('now', ?) WHERE id = ?",
+            (f"-{days_ago} days", row["id"]))
+        app.conn.execute(
+            "UPDATE content SET posted_at = datetime('now', ?), created_at = datetime('now', ?) "
+            "WHERE id = (SELECT content_id FROM posts WHERE id = ?)",
+            (f"-{days_ago} days", f"-{days_ago} days", row["id"]))
+    app.conn.commit()
+
+    # Metrics over "time": collect several rounds so charts have shape, and
+    # backdate each snapshot near its post date.
+    for round_ in range(4):
         collector.collect(app)
+        app.conn.execute(
+            "UPDATE metrics SET collected_at = ("
+            "  SELECT datetime(p.posted_at, '+' || (? * 6) || ' hours')"
+            "  FROM posts p WHERE p.id = metrics.post_id)"
+            "WHERE collected_at >= datetime('now', '-1 minute')", (round_,))
+        app.conn.commit()
     sentiment.analyze_unscored(app, llm)
     print("metrics + sentiment collected")
 

@@ -61,13 +61,13 @@ def main(home: str, out_dir: str, port: int = 8399) -> None:
                                     device_scale_factor=2)
             base = f"http://127.0.0.1:{port}"
             for name, path in PAGES:
-                page.goto(base + path, wait_until="networkidle")
+                page.goto(base + path, wait_until="load")
                 page.wait_for_timeout(700)
                 page.screenshot(path=str(out / f"{name}.png"))
                 print(f"✓ {name}")
 
             # Interactions: studio drawer + campaign modal.
-            page.goto(base + "/studio", wait_until="networkidle")
+            page.goto(base + "/studio", wait_until="load")
             page.wait_for_timeout(600)
             cards = page.locator(".content-card")
             if cards.count() > 0:
@@ -77,7 +77,7 @@ def main(home: str, out_dir: str, port: int = 8399) -> None:
                 print("✓ studio-drawer")
                 page.keyboard.press("Escape")
 
-            page.goto(base + "/campaigns", wait_until="networkidle")
+            page.goto(base + "/campaigns", wait_until="load")
             page.wait_for_timeout(500)
             btn = page.get_by_role("button", name="New campaign")
             if btn.count() > 0:
@@ -89,7 +89,11 @@ def main(home: str, out_dir: str, port: int = 8399) -> None:
             browser.close()
     finally:
         server.terminate()
-        server.wait(timeout=10)
+        try:
+            server.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            server.kill()  # open SSE connections can stall graceful shutdown
+            server.wait(timeout=5)
     print(f"screenshots → {out}")
 
 

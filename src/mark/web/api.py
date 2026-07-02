@@ -5,8 +5,10 @@ per-thread App via the Runtime. Long work (generate/post/learn/trends/collect)
 returns a job id immediately; progress streams over /api/events (SSE).
 """
 
-from __future__ import annotations
-
+# NOTE: no `from __future__ import annotations` here — it would turn endpoint
+# annotations into strings, and FastAPI cannot resolve ForwardRefs to the
+# request-body models defined inside build_router()'s closure (bodies would
+# silently degrade to required query params and every POST/PATCH would 422).
 import json
 import re
 from pathlib import Path
@@ -136,7 +138,7 @@ def build_router(rt: Runtime) -> APIRouter:
             JOIN content c ON c.id = po.content_id
             WHERE m.id IN (SELECT MAX(id) FROM metrics GROUP BY post_id)
               AND po.posted_at >= datetime('now', '-14 days')
-            GROUP BY day, platform ORDER BY day
+            GROUP BY day, c.platform ORDER BY day
             """)]
         return {
             "campaigns": campaigns,
@@ -478,7 +480,7 @@ def build_router(rt: Runtime) -> APIRouter:
             JOIN content c ON c.id = po.content_id
             WHERE m.id IN (SELECT MAX(id) FROM metrics GROUP BY post_id)
               AND po.posted_at >= datetime('now', ?) {where_campaign}
-            GROUP BY day, platform ORDER BY day
+            GROUP BY day, c.platform ORDER BY day
             """, params)]
         totals = db_module.query_one(
             app.conn,
@@ -590,8 +592,14 @@ def build_router(rt: Runtime) -> APIRouter:
             return {"insights": None, "bandit": [], "winners": 0}
         from ..learning import bandit, feedback, winners
 
+        data = feedback.latest_insights(app, product["id"])
+        insights_out = None
+        if data:
+            data = dict(data)
+            created = data.pop("_created_at", None)
+            insights_out = {"payload": data, "created_at": created}
         return {
-            "insights": feedback.latest_insights(app, product["id"]),
+            "insights": insights_out,
             "bandit": bandit.leaderboard(app, product["id"]),
             "winners": winners.count(app, product_id=product["id"]),
             "campaign": product["id"],

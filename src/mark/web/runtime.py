@@ -186,6 +186,7 @@ class Autopilot:
 
     def stop(self) -> None:
         with self._lock:
+            was_running = self._sched is not None
             if self._sched is not None:
                 try:
                     self._sched.shutdown(wait=False)
@@ -193,6 +194,8 @@ class Autopilot:
                     pass
                 self._sched = None
             self.started_at = None
+            if not was_running:
+                return  # idempotent shutdown — don't spam the activity feed
             app = self.runtime.fresh_app()
             from .. import db as db_module
 
