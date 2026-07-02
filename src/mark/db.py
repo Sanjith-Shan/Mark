@@ -1,0 +1,231 @@
+"""SQLite database: schema, migrations, and query helpers.
+
+Raw SQL, no ORM. Connections use WAL mode and ``sqlite3.Row`` for dict-like
+access. JSON-encoded columns (hashtags, media_paths, ...) are round-tripped
+through the helpers in this module so callers work with native Python types.
+"""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+from pathlib import Path
+from typing import Any, Iterable, Optional
+
+# --------------------------------------------------------------------------- #
+# Schema
+# --------------------------------------------------------------------------- #
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS products (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT NOT NULL,
+    target_audience TEXT NOT NULL,
+    brand_voice TEXT NOT NULL,
+    website_url TEXT,
+    platforms TEXT NOT NULL,
+    posting_cadence TEXT NOT NULL,
+    active INTEGER DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS content (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id TEXT NOT NULL REFERENCES products(id),
+    platform TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    caption TEXT,
+    hashtags TEXT,
+    hook TEXT,
+    media_paths TEXT,
+    media_urls TEXT,
+    strategy_context TEXT,
+    status TEXT DEFAULT 'draft',
+    rejection_feedback TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    approved_at TIMESTAMP,
+    posted_at TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS posts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content_id INTEGER NOT NULL REFERENCES content(id),
+    platform TEXT NOT NULL,
+    platform_post_id TEXT,
+    request_id TEXT,
+    posted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS metrics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    post_id INTEGER NOT NULL REFERENCES posts(id),
+    views INTEGER DEFAULT 0,
+    likes INTEGER DEFAULT 0,
+    comments INTEGER DEFAULT 0,
+    shares INTEGER DEFAULT 0,
+    saves INTEGER DEFAULT 0,
+    clicks INTEGER DEFAULT 0,
+    engagement_rate REAL DEFAULT 0.0,
+    collected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS comments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    post_id INTEGER NOT NULL REFERENCES posts(id),
+    comment_text TEXT NOT NULL,
+    sentiment TEXT,
+    sentiment_score REAL,
+    analyzed_at TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS winners (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content_id INTEGER NOT NULL REFERENCES content(id),
+    platform TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    caption TEXT,
+    hook TEXT,
+    engagement_rate REAL NOT NULL,
+    embedding BLOB,
+    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS bandit_arms (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    arm_type TEXT NOT NULL,
+    arm_value TEXT NOT NULL,
+    platform TEXT NOT NULL,
+    product_id TEXT NOT NULL REFERENCES products(id),
+    pulls INTEGER DEFAULT 0,
+    total_reward REAL DEFAULT 0.0,
+    avg_reward REAL DEFAULT 0.0,
+    alpha REAL DEFAULT 1.0,
+    beta_param REAL DEFAULT 1.0,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(arm_type, arm_value, platform, product_id)
+);
+
+CREATE TABLE IF NOT EXISTS trends (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL,
+    topic TEXT NOT NULL,
+    trend_score REAL,
+    metadata TEXT,
+    collected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Added by Mark (beyond the original spec):
+
+-- Per-call cost/usage tracking so you can see cost-per-post & cost-per-engagement.
+CREATE TABLE IF NOT EXISTS costs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider TEXT NOT NULL,            -- "openai", "fal", "elevenlabs", "upload_post"
+    operation TEXT NOT NULL,           -- "chat", "image", "tts", "embedding", "video", ...
+    model TEXT,
+    content_id INTEGER,                -- optional link to the content this was spent on
+    product_id TEXT,
+    input_tokens INTEGER DEFAULT 0,
+    output_tokens INTEGER DEFAULT 0,
+    units REAL DEFAULT 0.0,            -- generic unit count (images, seconds, chars)
+    usd REAL DEFAULT 0.0,
+    mocked INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Weekly analyzer output, kept so `mark insights` can show the latest.
+CREATE TABLE IF NOT EXISTS insights (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id TEXT NOT NULL REFERENCES products(id),
+    payload TEXT NOT NULL,             -- JSON EngagementInsights
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_status ON content(status);
+CREATE INDEX IF NOT EXISTS idx_content_product ON content(product_id);
+CREATE INDEX IF NOT EXISTS idx_metrics_post ON metrics(post_id);
+CREATE INDEX IF NOT EXISTS idx_posts_content ON posts(content_id);
+CREATE INDEX IF NOT EXISTS idx_winners_platform ON winners(platform, content_type);
+"""
+
+
+# --------------------------------------------------------------------------- #
+# Connection
+# --------------------------------------------------------------------------- #
+def connect(db_path: Path | str) -> sqlite3.Connection:
+    db_path = Path(db_path)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    # Timestamps are handled as plain strings throughout, so we deliberately skip
+    # PARSE_DECLTYPES (its default TIMESTAMP converter is deprecated in 3.12+).
+    conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA foreign_keys=ON;")
+    conn.execute("PRAGMA busy_timeout=5000;")
+    return conn
+
+
+def init_db(conn: sqlite3.Connection) -> None:
+    conn.executescript(SCHEMA)
+    conn.commit()
+
+
+# --------------------------------------------------------------------------- #
+# Generic helpers
+# --------------------------------------------------------------------------- #
+def execute(conn: sqlite3.Connection, sql: str, params: Iterable[Any] = ()) -> sqlite3.Cursor:
+    cur = conn.execute(sql, tuple(params))
+    conn.commit()
+    return cur
+
+
+def query(conn: sqlite3.Connection, sql: str, params: Iterable[Any] = ()) -> list[sqlite3.Row]:
+    return list(conn.execute(sql, tuple(params)).fetchall())
+
+
+def query_one(conn: sqlite3.Connection, sql: str, params: Iterable[Any] = ()) -> Optional[sqlite3.Row]:
+    return conn.execute(sql, tuple(params)).fetchone()
+
+
+def insert(conn: sqlite3.Connection, table: str, **values: Any) -> int:
+    """Insert a row; JSON-encode list/dict values automatically. Returns rowid."""
+    cols = list(values.keys())
+    encoded = [_encode(v) for v in values.values()]
+    placeholders = ", ".join("?" for _ in cols)
+    sql = f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({placeholders})"
+    cur = conn.execute(sql, encoded)
+    conn.commit()
+    return int(cur.lastrowid)
+
+
+def update(conn: sqlite3.Connection, table: str, row_id: int, **values: Any) -> None:
+    cols = list(values.keys())
+    encoded = [_encode(v) for v in values.values()]
+    assignments = ", ".join(f"{c} = ?" for c in cols)
+    sql = f"UPDATE {table} SET {assignments} WHERE id = ?"
+    conn.execute(sql, encoded + [row_id])
+    conn.commit()
+
+
+# --------------------------------------------------------------------------- #
+# JSON column helpers
+# --------------------------------------------------------------------------- #
+def _encode(value: Any) -> Any:
+    if isinstance(value, (list, dict)):
+        return json.dumps(value)
+    return value
+
+
+def loads(value: Any, default: Any = None) -> Any:
+    """Decode a JSON column, tolerating None / already-parsed values."""
+    if value is None or value == "":
+        return default
+    if isinstance(value, (list, dict)):
+        return value
+    try:
+        return json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        return default
+
+
+def row_to_dict(row: Optional[sqlite3.Row]) -> Optional[dict]:
+    return dict(row) if row is not None else None

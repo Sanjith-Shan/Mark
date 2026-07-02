@@ -1,0 +1,80 @@
+# Mark — global settings. Per-product settings live in config/products/*.yaml
+# and in the `products` table once added via `mark product add`.
+
+upload_post:
+  profile_username: "my-profile"    # Your upload-post.com profile name
+
+llm:
+  text_model: "gpt-4o"                  # Strategist / writer / analyzer
+  judge_model: "gpt-4o-mini"            # Cheaper model for variant judging / scoring
+  embedding_model: "text-embedding-3-small"
+  variants: 1                            # Candidate drafts to generate, then judge (1 = no contest)
+  self_critique: true                    # Revise drafts against the anti-slop rules before saving
+  novelty_threshold: 0.93                # Cosine sim above which new content is "too similar" to recent posts
+  novelty_lookback: 40                   # How many recent posts to compare against for novelty
+
+platforms:
+  tiktok:
+    enabled: true
+    max_posts_per_day: 2
+    content_types: ["video"]
+    optimal_times: ["11:00", "17:00", "20:00"]   # Refined over time by the bandit
+    hashtag_count: 5
+    privacy_level: "PUBLIC_TO_EVERYONE"
+  instagram:
+    enabled: true
+    max_posts_per_day: 2
+    content_types: ["video", "carousel", "image"]
+    optimal_times: ["08:00", "12:00", "17:00"]
+    hashtag_count: 15
+  x:
+    enabled: true
+    max_posts_per_day: 3
+    content_types: ["image", "text", "thread", "video"]
+    optimal_times: ["09:00", "12:00", "18:00"]
+    hashtag_count: 3
+  linkedin:
+    enabled: true
+    max_posts_per_day: 1
+    content_types: ["text", "image", "carousel"]
+    optimal_times: ["08:00", "16:00"]
+    hashtag_count: 5
+  youtube:
+    enabled: true
+    max_posts_per_day: 1
+    content_types: ["video"]
+    optimal_times: ["12:00", "17:00"]
+  bluesky:
+    enabled: true
+    max_posts_per_day: 3
+    content_types: ["text", "image"]
+    optimal_times: ["09:00", "14:00", "19:00"]
+    hashtag_count: 0
+  threads:
+    enabled: true
+    max_posts_per_day: 2
+    content_types: ["text", "image"]
+    optimal_times: ["10:00", "19:00"]
+    hashtag_count: 0
+
+media:
+  image_model: "gpt-image-1"            # OpenAI image model
+  image_quality: "medium"                # "low", "medium", "high"
+  video_model: "fal-ai/kling-video/v3/text-to-video"
+  video_fallback: "fal-ai/wan/v2.6/text-to-video"
+  video_duration: 8                      # seconds
+  video_resolution: "720p"
+  tts_provider: "openai"                 # "openai" or "elevenlabs"
+  tts_voice: "onyx"
+
+scheduling:
+  timezone: "America/Los_Angeles"
+  content_generation_cron: "0 6 * * *"        # Generate content daily at 6am
+  analytics_collection_cron: "0 */6 * * *"     # Collect analytics every 6 hours
+  trend_monitoring_cron: "0 8,16 * * *"        # Monitor trends twice daily
+  feedback_loop_cron: "0 0 * * 0"              # Weekly feedback loop analysis
+  posting_jitter_minutes: 15                   # +/- random jitter on scheduled posting times
+
+approval:
+  auto_approve: false                    # Set true once you trust the output
+  auto_approve_types: []                 # Content types to auto-approve, e.g. ["text"]

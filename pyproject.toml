@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mark"
+version = "0.1.0"
+description = "Mark — a personal autonomous AI marketing engine that markets anything you build."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Sanjith" }]
+license = { text = "MIT" }
+
+# NOTE on offline-first design:
+# Mark is built so the *core* pipeline (config, db, agents, image gen, text
+# posting, learning) runs with only the lightweight deps below. The heavier,
+# optional providers (fal video, upload-post SDK, moviepy, whisper) are imported
+# lazily and degrade to a deterministic offline/mock path when absent. Install
+# the [media] / [all] extras to unlock the full real-API pipeline.
+dependencies = [
+    "openai>=1.51",          # LLM + image generation + TTS + embeddings
+    "httpx>=0.27",           # Async/sync HTTP client (trends, posting, analytics)
+    "Pillow>=10.0",          # Image processing, carousel assembly
+    "numpy>=1.26",           # Embeddings math, bandit calculations
+    "APScheduler>=3.10",     # Job scheduling
+    "typer>=0.12",           # CLI framework
+    "rich>=13.0",            # Terminal UI
+    "PyYAML>=6.0",           # Config files
+    "python-dotenv>=1.0",    # .env loading (optional — falls back to a tiny parser)
+    "pydantic>=2.0",         # Config/data validation
+]
+
+[project.optional-dependencies]
+media = [
+    "fal-client>=0.5",           # Video generation via fal.ai
+    "moviepy>=2.0",              # Video composition
+    "ffmpeg-python>=0.2",        # FFmpeg wrapper
+    "whisper-timestamped>=1.0",  # Word-level caption timestamps
+]
+posting = [
+    "upload-post>=2.2",          # Unified social posting SDK
+]
+trends = [
+    "pytrends>=4.9",             # Google Trends
+    "beautifulsoup4>=4.12",      # HTML parsing for trend scrapers
+]
+dev = [
+    "pytest>=8.0",
+]
+all = [
+    "mark[media,posting,trends,dev]",
+]
+
+[project.scripts]
+mark = "mark.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

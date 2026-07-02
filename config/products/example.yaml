@@ -1,0 +1,24 @@
+id: "sudoapply"
+name: "SudoApply"
+description: |
+  An AI-powered job application platform that automates applying to jobs.
+  Features multi-resume support, ATS autofill via Chrome extension, and a
+  Kanban application tracker. Built for students hunting for internships.
+target_audience: |
+  College students (18-24) actively looking for internships and entry-level jobs.
+  Frustrated by the repetitive nature of job applications. Tech-savvy, use
+  LinkedIn and job boards daily. Active on TikTok, Instagram, X, and LinkedIn.
+brand_voice: |
+  Casual, relatable, slightly irreverent. Speaks like a fellow student who gets
+  the pain of job hunting. Uses humor and memes. Never corporate-speak.
+  First person plural ("we") or second person ("you").
+  Short sentences. Punchy hooks.
+website_url: "https://sudoapply.com"
+platforms: ["tiktok", "instagram", "x", "linkedin", "youtube", "bluesky"]
+posting_cadence:
+  tiktok: 2
+  instagram: 2
+  x: 3
+  linkedin: 1
+  youtube: 1
+  bluesky: 2

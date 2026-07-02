@@ -1,0 +1,107 @@
+"""Strategist agent — decides WHAT to post (topic, format, angle, hook, tone).
+
+Takes the product, the target platform, and (optionally) current trends, past
+winners, and bandit recommendations, and returns a single :class:`ContentPlan`.
+"""
+
+from __future__ import annotations
+
+from typing import Optional
+
+from .. import db as db_module
+from .. import prompts
+from ..app import App
+from ..constants import HOOK_STYLES, TONES
+from ..llm import LLM
+from ..schemas import ContentPlan
+
+
+def plan_content(
+    app: App,
+    llm: LLM,
+    product: dict,
+    platform: str,
+    *,
+    trends: Optional[list[dict]] = None,
+    winners: Optional[list[dict]] = None,
+    bandit_picks: Optional[dict] = None,
+) -> ContentPlan:
+    trends = trends or []
+    winners = winners or []
+    bandit_picks = bandit_picks or {}
+    allowed = app.settings.platform(platform).content_types or ["text"]
+
+    system = prompts.strategist_system(product, platform, trends, winners, bandit_picks, allowed)
+    user = prompts.strategist_user(platform)
+
+    plan = llm.parse(
+        system, user, ContentPlan,
+        model=app.settings.llm.text_model,
+        temperature=0.95,
+        product_id=product["id"],
+        mock_factory=lambda: _mock_plan(app, product, platform, allowed, bandit_picks, trends),
+    )
+
+    # Guardrails: keep the chosen type within what the platform allows, and force
+    # the platform to match what we asked for. Honor bandit picks when present.
+    if plan.content_type not in allowed:
+        plan.content_type = bandit_picks.get("content_type", allowed[0])
+        if plan.content_type not in allowed:
+            plan.content_type = allowed[0]
+    plan.platform = platform
+    if bandit_picks.get("hook_style"):
+        plan.hook_style = bandit_picks["hook_style"]
+    if bandit_picks.get("tone"):
+        plan.tone = bandit_picks["tone"]
+    return plan
+
+
+def _mock_plan(app: App, product: dict, platform: str, allowed: list[str],
+               bandit_picks: dict, trends: list[dict]) -> ContentPlan:
+    """Deterministic offline plan that still rotates choices for variety."""
+    # Rotate using how much content already exists for this product/platform.
+    row = db_module.query_one(
+        app.conn,
+        "SELECT COUNT(*) AS n FROM content WHERE product_id = ? AND platform = ?",
+        (product["id"], platform),
+    )
+    n = row["n"] if row else 0
+
+    content_type = bandit_picks.get("content_type") or allowed[n % len(allowed)]
+    if content_type not in allowed:
+        content_type = allowed[0]
+    hook_style = bandit_picks.get("hook_style") or HOOK_STYLES[n % len(HOOK_STYLES)]
+    tone = bandit_picks.get("tone") or TONES[n % len(TONES)]
+
+    trend = trends[0]["topic"] if trends else None
+    name = product["name"]
+    # Short noun-phrase topics so downstream copy templating reads naturally.
+    topics = [
+        "the daily grind this product kills",
+        "the manual busywork no one misses",
+        "the part of the job everyone hates",
+        "doing it the slow, old-fashioned way",
+        "the hours you get back",
+    ]
+    angles = [
+        "a relatable day-in-the-life",
+        "a bold before/after",
+        "a contrarian hot take",
+        "a quick practical tip",
+        "a short success story",
+    ]
+    topic = topics[n % len(topics)]
+    angle = angles[n % len(angles)]
+    if trend:
+        angle = f"{angle}, tied to the trend '{trend}'"
+    return ContentPlan(
+        platform=platform,
+        content_type=content_type,
+        topic=topic,
+        angle=angle,
+        hook_style=hook_style,
+        tone=tone,
+        trend_tie_in=trend,
+        reasoning="offline strategist: rotated content_type/hook/tone for variety"
+                  + (f", tied to trend '{trend}'" if trend else ""),
+    )

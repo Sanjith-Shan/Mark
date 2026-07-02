@@ -1,0 +1,84 @@
+"""Structured-output schemas shared across agents.
+
+These are the typed contracts the LLM must fill. Keeping them in one module means
+the prompt builders, the offline mock factories, and the DB writers all agree on
+the same shape.
+"""
+
+from __future__ import annotations
+
+from typing import Optional
+
+from pydantic import BaseModel, Field
+
+
+class ContentPlan(BaseModel):
+    """Strategist output — decides WHAT to post."""
+
+    platform: str
+    content_type: str          # "video", "image", "carousel", "text", "thread"
+    topic: str
+    angle: str
+    hook_style: str            # "question", "bold_claim", "story", "statistic", "pain_point", "before_after"
+    tone: str                  # "funny", "educational", "inspirational", "relatable", "controversial"
+    trend_tie_in: Optional[str] = None
+    reasoning: str = ""
+
+
+class ContentDraft(BaseModel):
+    """Writer output — the actual copy + media prompts."""
+
+    caption: str
+    hashtags: list[str] = Field(default_factory=list)
+    hook: str = ""
+    script: Optional[str] = None            # video: the spoken script
+    slide_texts: Optional[list[str]] = None  # carousel: text per slide
+    cta: Optional[str] = None
+    alt_text: Optional[str] = None
+    image_prompt: Optional[str] = None
+    image_prompts: Optional[list[str]] = None  # carousel: prompt per slide
+    video_prompt: Optional[str] = None
+    video_style: Optional[str] = None        # "talking_head", "b_roll", "text_overlay", "ai_generated"
+
+
+class JudgeVerdict(BaseModel):
+    """LLM-judge output when picking the best of several draft variants."""
+
+    best_index: int = 0
+    hook_strength: float = 0.0     # 0..10
+    brand_fit: float = 0.0         # 0..10
+    scroll_stopping: float = 0.0   # 0..10
+    slop_violations: list[str] = Field(default_factory=list)
+    reasoning: str = ""
+
+
+class CritiqueResult(BaseModel):
+    """Self-critique pass — flags problems and returns a revised caption/hook."""
+
+    needs_revision: bool = False
+    problems: list[str] = Field(default_factory=list)
+    revised_caption: Optional[str] = None
+    revised_hook: Optional[str] = None
+
+
+class EngagementInsights(BaseModel):
+    """Analyzer output — weekly patterns and recommended adjustments."""
+
+    top_performing_topics: list[str] = Field(default_factory=list)
+    worst_performing_topics: list[str] = Field(default_factory=list)
+    best_hook_styles: list[str] = Field(default_factory=list)
+    best_content_types: dict[str, str] = Field(default_factory=dict)   # platform -> type
+    best_posting_times: dict[str, str] = Field(default_factory=dict)   # platform -> time
+    audience_sentiment_summary: str = ""
+    recommended_adjustments: list[str] = Field(default_factory=list)
+    raw_analysis: str = ""
+
+
+class SentimentResult(BaseModel):
+    sentiment: str = "neutral"     # "positive", "negative", "neutral"
+    score: float = 0.0             # -1..1
+
+
+class TrendRelevance(BaseModel):
+    relevance: float = 0.0         # 0..1 — how relevant a trend is to the product
+    reasoning: str = ""
