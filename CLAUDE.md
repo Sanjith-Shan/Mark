@@ -1,5 +1,14 @@
 # CLAUDE.md — Autonomark: Personal Autonomous AI Marketing Platform
 
+> **Note (July 2026):** the package/CLI is named `mark` (not `autonomark`), and the
+> system has grown beyond this spec: a 12-strategy content framework
+> (`src/mark/strategies.py`), a humor engine (`src/mark/humor.py`), persistent AI
+> ambassador characters (`src/mark/characters.py`, `config/characters/`),
+> real-time trend reaction, comment-reply drafting, deterministic franchise
+> renderers, and a web app. **`docs/research/MASTER-STRATEGY.md` is the source of
+> truth for all content-strategy decisions** — edit there first, then encode in
+> code. This file remains the source of truth for the core stack and build rules.
+
 ## What This Is
 
 A personal Python CLI tool that autonomously generates platform-specific marketing content (images, video, text, carousels) for whatever product I'm currently working on, posts it across TikTok, Instagram, X, LinkedIn, YouTube Shorts, Bluesky, Threads, and Reddit, monitors engagement, and uses that data to improve future content over time. This is NOT a SaaS product — it's a power tool for one person (me).
