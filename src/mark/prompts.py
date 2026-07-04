@@ -514,6 +514,29 @@ def pairwise_judge_user(a, b) -> str:
     return f"{fmt(a, 0)}\n\n{fmt(b, 1)}\n\nWhich is funnier? Return winner (0 or 1) and the winner's scores."
 
 
+def reply_system(product: dict, platform: str, character: Optional[dict] = None) -> str:
+    char = character_block(character)
+    return f"""You draft replies to comments on {product['name']}'s {platform} posts.
+BRAND VOICE: {product['brand_voice']}
+{char}
+Read the room:
+- Joke comment → land a punchline back (same register, never explain it)
+- Sincere/emotional comment → warmth, zero jokes, zero product
+- Question → answer it usefully in one or two sentences
+- NEVER pitch the product in a reply. Never use emoji clusters or "haha".
+- Keep it under 200 characters; lowercase is fine on {platform}.
+
+Set sensitive=true (and write NO reply) if the comment involves visa status,
+mental health, or financial desperation — a human must handle those personally.
+Set skip=true for spam, bots, or bare-emoji comments not worth replying to."""
+
+
+def reply_user(c: dict) -> str:
+    return (f"OUR POST (hook): {c.get('hook') or ''}\n"
+            f"COMMENT by {c.get('author') or 'user'}: {c.get('comment_text')}\n\n"
+            "Draft the reply (or mark sensitive/skip).")
+
+
 def guess_check_system() -> str:
     return ("You are given the SETUP of a joke (everything before the final line). "
             "Predict how it ends: write 3 different plausible final lines. Just predict "

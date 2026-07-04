@@ -154,6 +154,21 @@ CREATE TABLE IF NOT EXISTS activity (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Drafted replies to comments on our posts (first-hour replies are one of the
+-- strongest distribution levers; drafts are one-tap approved, never auto-sent).
+CREATE TABLE IF NOT EXISTS replies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    comment_id INTEGER NOT NULL REFERENCES comments(id),
+    post_id INTEGER NOT NULL REFERENCES posts(id),
+    content_id INTEGER,
+    product_id TEXT,
+    platform TEXT,
+    reply_text TEXT NOT NULL,
+    sensitive INTEGER DEFAULT 0,       -- visa/mental-health/desperation → human only
+    status TEXT DEFAULT 'draft',       -- "draft", "approved", "posted", "skipped"
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Persistent AI characters (brand ambassadors / mascots) fronting content.
 CREATE TABLE IF NOT EXISTS characters (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

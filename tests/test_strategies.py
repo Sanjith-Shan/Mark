@@ -308,6 +308,34 @@ def test_cascade_adapts_winner_cross_platform(app, llm, product):
     assert sctx["cascade_source_platform"] == "x"
 
 
+def test_reply_drafting_and_sensitive_gate(app, llm, product):
+    from mark import replies
+
+    cid = _seed_posted(app, product, "x", "a post with comments", 0.1)
+    post = db_module.query_one(app.conn, "SELECT id FROM posts WHERE content_id = ?",
+                               (cid,))
+    db_module.insert(app.conn, "comments", post_id=post["id"],
+                     comment_text="is this free?", author="user1", platform="x")
+    db_module.insert(app.conn, "comments", post_id=post["id"],
+                     comment_text="i can't afford rent and my visa expires soon",
+                     author="user2", platform="x")
+
+    drafted = replies.draft_replies(app, llm, product)
+    assert len(drafted) == 2
+    by_author = {d["author"]: d for d in drafted}
+    assert by_author["user1"]["reply_text"]
+    assert by_author["user1"]["sensitive"] == 0
+    assert by_author["user2"]["sensitive"] == 1  # human-only
+
+    # Idempotent: already-drafted comments aren't re-drafted.
+    assert replies.draft_replies(app, llm, product) == []
+
+    # Status transitions.
+    rid = by_author["user1"]["id"]
+    out = replies.set_status(app, rid, "posted", reply_text="edited reply")
+    assert out["status"] == "posted" and out["reply_text"] == "edited reply"
+
+
 def test_job_cascade_skips_duplicates(app, llm, product):
     from mark.scheduler import engine
 

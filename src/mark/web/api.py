@@ -749,6 +749,54 @@ def build_router(rt: Runtime) -> APIRouter:
                              product_id=character["product_id"])
         return {"job_id": job.id}
 
+    # ------------------------------------------------------------------ #
+    # Comment replies (drafted for one-tap approval)
+    # ------------------------------------------------------------------ #
+    @r.get("/replies")
+    def replies_list(campaign: Optional[str] = None, status: str = "draft",
+                     limit: int = 50) -> list[dict]:
+        from .. import replies as replies_mod
+
+        app = rt.app()
+        product = store.resolve_product(app.conn, campaign)
+        return replies_mod.list_drafts(app, product_id=product["id"] if product else None,
+                                       status=status, limit=limit)
+
+    @r.post("/replies/draft")
+    def draft_replies_now(campaign: Optional[str] = None) -> dict:
+        app = rt.app()
+        product = store.resolve_product(app.conn, campaign)
+        if not product:
+            raise HTTPException(400, "no campaign")
+
+        def _run(app, llm, job, report):
+            from .. import replies as replies_mod
+
+            report(0.3, "Drafting replies to fresh comments…")
+            drafted = replies_mod.draft_replies(app, llm, product)
+            report(1.0, f"Drafted {len(drafted)} replies")
+            return {"drafted": len(drafted)}
+
+        job = rt.jobs.submit("replies", "Draft comment replies", _run,
+                             product_id=product["id"])
+        return {"job_id": job.id}
+
+    class ReplyPatch(BaseModel):
+        reply_text: Optional[str] = None
+        status: Optional[str] = None   # "approved" | "posted" | "skipped" | "draft"
+
+    @r.patch("/replies/{reply_id}")
+    def patch_reply(reply_id: int, body: ReplyPatch) -> dict:
+        from .. import replies as replies_mod
+
+        app = rt.app()
+        row = replies_mod.get(app, reply_id)
+        if not row:
+            raise HTTPException(404, "reply not found")
+        out = replies_mod.set_status(app, reply_id, body.status or row["status"],
+                                     reply_text=body.reply_text)
+        return out
+
     @r.get("/insights")
     def insights(campaign: Optional[str] = None) -> dict:
         app = rt.app()

@@ -83,11 +83,18 @@ def job_post_platform(app: App, platform: str) -> None:
     log.info("posted content %s to %s", row["id"], platform)
 
 
-def job_collect_analytics(app: App) -> None:
+def job_collect_analytics(app: App, llm: Optional[LLM] = None) -> None:
     from ..analytics import collector
 
     for product in _all_products(app):
         _safe(collector.collect, app, product["id"])
+    # Fresh comments just landed — draft in-voice replies for one-tap approval
+    # (author-reply velocity is a major ranking signal on every platform).
+    if llm is not None:
+        from .. import replies
+
+        for product in _active_products(app):
+            _safe(replies.draft_replies, app, llm, product)
     log.info("collected analytics")
 
 
@@ -258,9 +265,9 @@ def build_scheduler(app: App, llm: LLM, *, blocking: bool = True,
     sched.add_job(_job(job_generate, needs_llm=True),
                   CronTrigger.from_crontab(sc.content_generation_cron, timezone=tz),
                   id="generate", name="generate drafts")
-    sched.add_job(_job(job_collect_analytics),
+    sched.add_job(_job(job_collect_analytics, needs_llm=True),
                   CronTrigger.from_crontab(sc.analytics_collection_cron, timezone=tz),
-                  id="analytics", name="collect analytics")
+                  id="analytics", name="collect analytics + draft replies")
     sched.add_job(_job(job_trends, needs_llm=True),
                   CronTrigger.from_crontab(sc.trend_monitoring_cron, timezone=tz),
                   id="trends", name="refresh trends")

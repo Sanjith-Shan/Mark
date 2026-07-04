@@ -176,6 +176,26 @@ function SettingsLoaded(props: {
     auto_approve: !!s.approval?.auto_approve,
     auto_approve_types: s.approval?.auto_approve_types ?? [],
   });
+  const [humor, setHumor] = useState<HumorSettings>({
+    enabled: s.humor?.enabled ?? true,
+    candidates: s.humor?.candidates ?? 6,
+    candidates_light: s.humor?.candidates_light ?? 3,
+    min_violation: s.humor?.min_violation ?? 0.5,
+    min_benignness: s.humor?.min_benignness ?? 0.5,
+    predictability_filter: s.humor?.predictability_filter ?? true,
+    model: s.humor?.model ?? "",
+  });
+  const [trends, setTrends] = useState<TrendsSettings>({
+    auto_react: !!s.trends?.auto_react,
+    react_threshold: s.trends?.react_threshold ?? 0.55,
+    min_velocity: s.trends?.min_velocity ?? 0,
+    max_reactions_per_day: s.trends?.max_reactions_per_day ?? 2,
+    react_platforms: s.trends?.react_platforms ?? [],
+    fast_poll_minutes: s.trends?.fast_poll_minutes ?? 30,
+    subreddits: s.trends?.subreddits ?? [],
+  });
+  // Subreddits edit as a comma-separated string; parsed back on save.
+  const [subredditsText, setSubredditsText] = useState(trends.subreddits.join(", "));
   const [profile, setProfile] = useState(
     s.upload_post?.profile_username ?? initial.profile_username ?? "",
   );
@@ -184,7 +204,14 @@ function SettingsLoaded(props: {
   const mediaSave = useSectionSave("media", reload);
   const schedSave = useSectionSave("scheduling", reload);
   const approvalSave = useSectionSave("approval", reload);
+  const humorSave = useSectionSave("humor", reload);
+  const trendsSave = useSectionSave("trends", reload);
   const profileSave = useSectionSave("upload_post", reload);
+
+  const saveTrends = () => trendsSave.save({
+    ...trends,
+    subreddits: subredditsText.split(",").map((x) => x.trim().replace(/^r\//, "")).filter(Boolean),
+  });
 
   return (
     <>
@@ -396,9 +423,139 @@ function SettingsLoaded(props: {
             </p>
           </div>
         </Card>
+
+        {/* 7. Humor engine */}
+        <Card title="Humor engine"
+          action={<SaveBtn saving={humorSave.saving} onClick={() => humorSave.save(humor)} />}>
+          <div className="stack" style={{ gap: 14 }}>
+            <div className="row between">
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>Humor engine</div>
+                <div className="small faint">Scaffold, gate, and pick jokes for humor-led strategies.</div>
+              </div>
+              <Switch checked={humor.enabled}
+                onChange={(v) => setHumor({ ...humor, enabled: v })} />
+            </div>
+            <div className="grid cols-2">
+              <div className="field">
+                <span className="field-label">Joke candidates</span>
+                <input className="input" type="number" min={1} max={12} value={humor.candidates}
+                  onChange={(e) => setHumor({ ...humor, candidates: Math.max(1, Math.round(Number(e.target.value) || 1)) })} />
+                <span className="field-hint">Candidates per piece for full-humor strategies.</span>
+              </div>
+              <div className="field">
+                <span className="field-label">Candidates (light humor)</span>
+                <input className="input" type="number" min={1} max={12} value={humor.candidates_light}
+                  onChange={(e) => setHumor({ ...humor, candidates_light: Math.max(1, Math.round(Number(e.target.value) || 1)) })} />
+              </div>
+            </div>
+            <div className="grid cols-2">
+              <div className="field">
+                <span className="field-label">Min violation</span>
+                <input className="input" type="number" min={0} max={1} step={0.05} value={humor.min_violation}
+                  onChange={(e) => setHumor({ ...humor, min_violation: Number(e.target.value) })} />
+                <span className="field-hint">Below this the joke is bland corporate safety (0–1).</span>
+              </div>
+              <div className="field">
+                <span className="field-label">Min benignness</span>
+                <input className="input" type="number" min={0} max={1} step={0.05} value={humor.min_benignness}
+                  onChange={(e) => setHumor({ ...humor, min_benignness: Number(e.target.value) })} />
+                <span className="field-hint">Below this the joke punches wrong (0–1).</span>
+              </div>
+            </div>
+            <div className="row between">
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>Predictability filter</div>
+                <div className="small faint">Kill jokes whose punchline can be guessed from the setup.</div>
+              </div>
+              <Switch checked={humor.predictability_filter}
+                onChange={(v) => setHumor({ ...humor, predictability_filter: v })} />
+            </div>
+            <div className="field">
+              <span className="field-label">Humor model</span>
+              <input className="input mono" value={humor.model} placeholder="(empty = text model)"
+                onChange={(e) => setHumor({ ...humor, model: e.target.value })} />
+              <span className="field-hint">Override model for joke generation. Empty = the main text model.</span>
+            </div>
+          </div>
+        </Card>
+
+        {/* 8. Trend reaction */}
+        <Card title="Trend reaction"
+          action={<SaveBtn saving={trendsSave.saving} onClick={saveTrends} />}>
+          <div className="stack" style={{ gap: 14 }}>
+            <div className="row between">
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 13 }}>Auto-react to hot trends</div>
+                <div className="small" style={{ color: trends.auto_react ? "var(--amber)" : "var(--text-faint)" }}>
+                  {trends.auto_react
+                    ? "⚡ Mark drafts trend-riding content the moment a hot trend appears — drafts still wait for approval unless auto-approve is on."
+                    : "Off — ride trends manually from the Trends page."}
+                </div>
+              </div>
+              <Switch checked={trends.auto_react}
+                onChange={(v) => setTrends({ ...trends, auto_react: v })} />
+            </div>
+            <div className="grid cols-2">
+              <div className="field">
+                <span className="field-label">React threshold</span>
+                <input className="input" type="number" min={0} max={1} step={0.05} value={trends.react_threshold}
+                  onChange={(e) => setTrends({ ...trends, react_threshold: Number(e.target.value) })} />
+                <span className="field-hint">Min trend score (relevance × popularity) to count as “hot”.</span>
+              </div>
+              <div className="field">
+                <span className="field-label">Min velocity</span>
+                <input className="input" type="number" step={0.01} value={trends.min_velocity}
+                  onChange={(e) => setTrends({ ...trends, min_velocity: Number(e.target.value) })} />
+                <span className="field-hint">Skip falling trends — a late meme is brand cringe.</span>
+              </div>
+            </div>
+            <div className="grid cols-2">
+              <div className="field">
+                <span className="field-label">Max reactions / day</span>
+                <input className="input" type="number" min={0} value={trends.max_reactions_per_day}
+                  onChange={(e) => setTrends({ ...trends, max_reactions_per_day: Math.max(0, Math.round(Number(e.target.value) || 0)) })} />
+                <span className="field-hint">Per campaign — don't trend-jack everything.</span>
+              </div>
+              <div className="field">
+                <span className="field-label">Fast poll (min)</span>
+                <input className="input" type="number" min={5} value={trends.fast_poll_minutes}
+                  onChange={(e) => setTrends({ ...trends, fast_poll_minutes: Math.max(5, Math.round(Number(e.target.value) || 5)) })} />
+                <span className="field-hint">Reddit rising / Bluesky / Google RSS poll interval.</span>
+              </div>
+            </div>
+            <div className="field">
+              <span className="field-label">React on these platforms</span>
+              <div className="grid cols-3" style={{ gap: 8 }}>
+                {ALL_PLATFORMS.map((p) => {
+                  const checked = trends.react_platforms.includes(p);
+                  return (
+                    <div key={p} className={`checkbox-row ${checked ? "checked" : ""}`}
+                      onClick={() => setTrends({
+                        ...trends,
+                        react_platforms: checked
+                          ? trends.react_platforms.filter((x) => x !== p)
+                          : [...trends.react_platforms, p],
+                      })}>
+                      <input type="checkbox" checked={checked} readOnly style={{ pointerEvents: "none" }} />
+                      <span style={{ fontSize: 13 }}>{PLATFORM_LABELS[p] ?? p}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <span className="field-hint">None selected = all enabled platforms.</span>
+            </div>
+            <div className="field">
+              <span className="field-label">Subreddits <span className="faint">(comma-separated)</span></span>
+              <input className="input" value={subredditsText} placeholder="recruitinghell, internships, jobs"
+                onChange={(e) => setSubredditsText(e.target.value)} />
+              <span className="field-hint">Niche subs watched for early trend signal and content material.</span>
+            </div>
+          </div>
+        </Card>
       </div>
 
-      {/* 7. Spend */}
+      {/* 9. Spend */}
       <SpendCard costs={costs} />
     </>
   );
