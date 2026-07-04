@@ -23,6 +23,7 @@ PAGES = [
     ("studio", "/studio"),
     ("analytics", "/analytics"),
     ("trends", "/trends"),
+    ("playbook", "/playbook"),
     ("learn", "/learn"),
     ("autopilot", "/autopilot"),
     ("settings", "/settings"),
