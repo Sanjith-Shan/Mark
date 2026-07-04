@@ -24,7 +24,10 @@ def estimate_duration(text: str) -> float:
 
 
 def synthesize(app: App, llm: LLM, text: str, out_path: Path, *,
-               voice: str | None = None, content_id=None, product_id=None) -> tuple[Path, float]:
+               voice: str | None = None, instructions: str | None = None,
+               content_id=None, product_id=None) -> tuple[Path, float]:
+    """``instructions`` steers delivery (gpt-4o-mini-tts supports it) — comedic
+    timing is half the joke, so humorous scripts pass a deadpan/pause brief."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     provider = app.settings.media.tts_provider
@@ -38,9 +41,10 @@ def synthesize(app: App, llm: LLM, text: str, out_path: Path, *,
     if not app.is_mock("openai"):
         model = getattr(app.settings.media, "tts_model", None) or "gpt-4o-mini-tts"
         mp3 = out_path.with_suffix(".mp3")
-        with llm.client().audio.speech.with_streaming_response.create(
-            model=model, voice=voice, input=text
-        ) as resp:
+        kwargs = {"model": model, "voice": voice, "input": text}
+        if instructions and not model.startswith("tts-1"):  # tts-1* rejects it
+            kwargs["instructions"] = instructions
+        with llm.client().audio.speech.with_streaming_response.create(**kwargs) as resp:
             resp.stream_to_file(str(mp3))
         log_external_cost(app, "openai", "tts", model, units=len(text),
                           content_id=content_id, product_id=product_id)

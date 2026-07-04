@@ -39,9 +39,19 @@ def produce_video(app: App, llm: LLM, product: dict, content_id: int, plan, draf
     script = (draft.script or draft.caption or plan.topic).strip()
 
     # 1) Voiceover (in the character's voice when one fronts this content).
+    # Comedic scripts get a delivery brief — deadpan, and a beat before the
+    # final line (experts lengthen the pre-punch pause ~41%; timing is half
+    # the mechanism).
     voice = (character or {}).get("voice") or None
+    instructions = None
+    if getattr(draft, "humor_mechanism", None):
+        instructions = ("Deadpan, dry, completely matter-of-fact — like someone "
+                        "who has survived 400 job applications. Do NOT sound "
+                        "excited or salesy. Take a clear beat of silence before "
+                        "the final line, then deliver it flat.")
     audio_path, duration = tts.synthesize(
         app, llm, script, out_dir / f"{content_id}_voice", voice=voice,
+        instructions=instructions,
         content_id=content_id, product_id=product["id"])
 
     # 2) Background visual (AI video if fal is live, else a generated image).
