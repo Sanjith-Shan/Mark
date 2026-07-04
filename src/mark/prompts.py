@@ -22,62 +22,94 @@ BANNED_PHRASES = [
 ANTI_SLOP = (
     "Never use generic marketing slop. Banned phrases include: "
     + "; ".join(f'"{p}"' for p in BANNED_PHRASES)
-    + ". Be specific and concrete, never vague and generic. Write like a real "
+    + ". Also banned: \"it's not X, it's Y\" constructions (AI-classifier tell), "
+    "emoji-bullet listicles, exclamation clusters, engagement bait (\"Like if\", "
+    "\"Comment YES\", \"Thoughts?\" as a closer), and expired slang (rizz, no cap, "
+    "slay, bussin, delulu, skibidi, sigma, \"it's giving\"). "
+    "Be specific and concrete, never vague and generic. Write like a real "
     "person texting a friend, not a brand. Hooks must be under 10 words and create "
     "curiosity or emotion. Mention the product naturally — never forced."
 )
 
+# The ten commandments (docs/research/MASTER-STRATEGY.md Appendix B) — printed
+# above every writer prompt.
+COMMANDMENTS = """THE RULES (non-negotiable):
+1. Mock the system, never the audience.
+2. Never explain the joke; punch word last; nothing after it.
+3. Specific beats generic — every post carries one lived artifact.
+4. Self-aware AI or no AI; never counterfeit sincerity.
+5. Commit to bits; universes compound, one-offs don't.
+6. Real numbers only; fabrication is existential.
+7. Product is set dressing, never the punchline.
+8. Optimize sends, saves, completion, replies — not likes.
+9. When in doubt, write nothing flashy — bland trains the algorithm against you."""
+
 # --------------------------------------------------------------------------- #
 # Platform-specific writing rules (from the spec)
 # --------------------------------------------------------------------------- #
+# Per-platform writing rules — encoded from the 2026 platform playbooks in
+# docs/research/MASTER-STRATEGY.md §4 (edit there first, then here).
 PLATFORM_RULES = {
     "tiktok": """
-    - Caption max 2200 chars, but shorter is better (under 150 ideal)
-    - If video: script should be 15-60 seconds spoken
-    - Use 3-5 hashtags, mix popular + niche
-    - Hook must work in first 1-2 seconds
-    - Conversational, not polished — raw and authentic wins
-    - Script format: write exactly what should be said, line by line""",
+    - Video: 20-35s default; hook payoff by second 1-2 (outcome-first wins);
+      on-screen hook overlay ≤8 words, readable in one fixation, works muted
+    - Caption short (<150 chars), 3-5 niche hashtags
+    - KEYWORD-STACK: the same 2-3 search phrases must appear in the spoken script,
+      the on-screen text, AND the caption (TikTok is Gen Z's search engine)
+    - Script format: exactly what is spoken, line by line; conversational, raw —
+      polish reads as ad; humor ceiling is maximal (dark/absurdist fine)
+    - Carousels (photo-mode): 5-15 slides, slide 1 is a hook card
+    - Design the LAST line to flow back into the first (loop = rewatch = reach)""",
     "instagram": """
-    - Caption can be longer (up to 2200 chars), front-load the hook
-    - For Reels: same video rules as TikTok but slightly more polished
-    - For Carousels: write 5-10 slide texts, each slide one clear point
-    - Use 10-15 hashtags at the end of the caption
-    - Include a clear CTA (save, share, follow, link in bio)""",
+    - Reels: TikTok minus one notch of chaos, plus one notch of polish; hook text
+      frame 1, ≤7 words, must work muted (~50% watch muted)
+    - The test: "would a stressed junior send this to a friend?" — optimize each
+      post for ONE signal: sends (memes), saves (education), or profile visits (demos)
+    - Carousels: 8-12 slides educational, 5-8 meme decks; slide 1 hooks incompletely
+    - Caption is a search document — literal phrases ("summer internship applications")
+    - ≤5 hashtags (hashtag walls are dead); CTA matches the one signal""",
     "x": """
-    - Max 280 characters for single posts
-    - For threads: 3-7 tweets, first tweet is the hook
-    - Use 1-3 hashtags max
-    - Hot takes and contrarian opinions perform well
-    - Retweet-worthy = useful, surprising, or emotionally resonant
-    - No links in the main post — put the link in a reply""",
+    - Max 280 chars; screenshot-shaped; ONE idea per post
+    - lowercase deadpan is the native register; never corporate announcements
+    - ZERO hashtags (they read as spam in 2026)
+    - Design posts to be COMPLETED — leave the obvious slot for quote-posts
+    - Never a URL in the post body (near-zero reach) — link goes in a self-reply
+    - Threads rarely; the first post must stand entirely alone""",
     "linkedin": """
-    - Professional but not boring — personality wins
-    - Optimal length: 1200-1500 characters
-    - Line breaks between every 1-2 sentences (LinkedIn formatting)
-    - Open with a personal story or bold statement
-    - End with a question to drive comments
-    - Use 3-5 hashtags
-    - For carousels: PDF-style slides with clear takeaways""",
+    - 1000+ characters for text posts (reject anything under 600)
+    - Open with a personal story, number claim, or confession — never "Thrilled to share"
+    - Line breaks every 1-2 sentences; end with a question to drive comments
+    - NEVER: "it's not X, it's Y" (AI-classifier suppression), "Stop doing X"
+      templates, broetry, polls, engagement bait
+    - ≤3 hashtags; URLs never in body (post the link as a comment instead)
+    - Humor quota 20-30%: insider satire of the application grind only
+    - Carousels: 6-8 PDF-style slides, caption ≤100 chars""",
     "youtube": """
-    - Title: under 60 chars, curiosity-driven, include primary keyword
-    - Description: first 2 lines visible, front-load CTA
-    - Include #Shorts in description for Shorts
-    - Video must be vertical (9:16) and under 3 minutes""",
+    - Title: under 60 chars, curiosity + primary keyword (Shorts have a months-long
+      search tail — the only short-form that does)
+    - Include #Shorts in the description; topic legible on mute in frame 1 (3-6 words)
+    - Design for the loop: final line flows into the first line (every replay counts)
+    - Never templated sameness across Shorts (inauthentic-content channel flag)
+    - Pinned self-aware comment is a free second joke""",
     "bluesky": """
-    - Max 300 graphemes (roughly 300 chars)
-    - No hashtag culture yet — focus on substance
-    - Community values authenticity and substance over engagement bait
-    - Can include up to 4 images""",
+    - Max 300 graphemes; dry, wordy, communal register; zero hashtags
+    - NEVER attach AI-generated images or video — community blocklists are permanent.
+      Text only, or human-made screenshots
+    - Links are welcome here (the one platform that doesn't demote them)
+    - Self-aware smallness works ("we are a job app with 11 followers and honestly
+      that tracks"); ad-copy tone is fatal; never argue with anyone""",
     "threads": """
-    - Max 500 characters
-    - Conversational, casual tone
-    - Can include images
-    - Cross-posting from X works but adapt tone slightly""",
+    - Max 500 chars; person-typing-on-their-phone voice; playful, not feral
+    - End ≥50% of posts with a genuine question a stranger could answer from
+      experience (question posts get 5-10x replies; rage/dunking is demoted)
+    - No LLM tells: no em-dash cadence, no "Great question!", no bullet lists
+    - Links in at most 1 of 4 posts""",
     "reddit": """
-    - Title is everything — specific, no clickbait, follows subreddit norms
-    - Body provides genuine value; overt promotion gets removed
-    - No hashtags. Talk like a member of the community, not a marketer""",
+    - DRAFT ONLY — never auto-posted; a human submits from a seasoned account
+    - Title is everything: specific, zero clickbait, subreddit-native
+    - 9:1 value-to-promo; product mentioned only when directly relevant, with
+      affiliation disclosed; write as a suffering member of the community
+    - Zero LLM tells — mods ban on style vibes alone""",
     "pinterest": """
     - Vertical 2:3 images, text overlay describing the value
     - Keyword-rich descriptions for search""",
@@ -150,6 +182,24 @@ def strategy_examples_block(strategy) -> str:
     return f"\nWHAT GREAT OUTPUT UNDER THIS STRATEGY LOOKS LIKE (flavor, don't copy):\n{ex}"
 
 
+def knowledge_block(product: dict, strategy) -> str:
+    """Inject the product knowledge pool this strategy draws on (pain veins,
+    fact base, take pool). Specific raw material in, specific content out."""
+    if not strategy or not strategy.knowledge_pool:
+        return ""
+    from . import db as db_module
+
+    pools = db_module.loads(product.get("knowledge"), {}) or {}
+    items = pools.get(strategy.knowledge_pool) or []
+    if not items:
+        return ""
+    labels = {"pain_veins": "PAIN VEINS (pick ONE and go narrow)",
+              "fact_base": "FACT BASE (cite ONLY from these verified claims)",
+              "take_pool": "TAKE POOL (whitelisted targets and angles)"}
+    listing = "\n".join(f"- {i}" for i in items[:12])
+    return f"\n{labels.get(strategy.knowledge_pool, strategy.knowledge_pool.upper())}:\n{listing}"
+
+
 def character_block(character: Optional[dict]) -> str:
     """Injected into the writer when a persistent character fronts the content."""
     if not character:
@@ -157,14 +207,24 @@ def character_block(character: Optional[dict]) -> str:
     phrases = character.get("catchphrases") or []
     phrase_line = ("\nCATCHPHRASES (use sparingly, max one per post): "
                    + "; ".join(f'"{p}"' for p in phrases[:5])) if phrases else ""
+    lore = character.get("lore_state") or {}
+    lore_line = ""
+    if lore:
+        import json as _json
+
+        lore_line = ("\nLORE STATE (running canon — reference at least one element; "
+                     "callbacks convert viewers into followers; NEVER explain the lore "
+                     f"in-post):\n{_json.dumps(lore, indent=2)[:800]}")
     return f"""
 THIS CONTENT IS FRONTED BY A PERSISTENT CHARACTER — write AS them, not about them.
 CHARACTER: {character['name']} ({character.get('role') or 'ambassador'})
 PERSONA: {character['persona']}
-APPEARANCE (for media prompts): {character['visual_desc']}{phrase_line}
+APPEARANCE (for media prompts): {character['visual_desc']}{phrase_line}{lore_line}
 Stay ruthlessly in character. The character's voice OVERRIDES the default brand
-voice where they conflict. Never break the fourth wall about being AI unless the
-persona explicitly plays with that."""
+voice where they conflict. The character openly knows it is AI — that is part of
+the bit; it never claims to be human and never gives product testimonials.
+For video scripts: include a brief on-screen disclosure line in the first seconds
+("{character['name']} is an AI character")."""
 
 
 # --------------------------------------------------------------------------- #
@@ -176,6 +236,7 @@ def strategist_system(product: dict, platform: str, trends: list[dict],
                       forced_trend: Optional[dict] = None) -> str:
     strat = strategy_block(strategy, platform, episode)
     strat_brief = f"\nSTRATEGY BRIEF: {strategy.strategist_brief}" if strategy and strategy.strategist_brief else ""
+    knowledge = knowledge_block(product, strategy)
     forced = ""
     if forced_trend:
         style = (forced_trend.get("style_notes") or "").strip()
@@ -186,7 +247,7 @@ def strategist_system(product: dict, platform: str, trends: list[dict],
                   "product to the caption."
                   + (f"\nHOW CREATORS ARE EXECUTING IT: {style}" if style else ""))
     return f"""You are a world-class social media strategist for {product['name']}.
-{strat}{strat_brief}{forced}
+{strat}{strat_brief}{knowledge}{forced}
 
 PRODUCT: {product['description']}
 TARGET AUDIENCE: {product['target_audience']}
@@ -211,6 +272,12 @@ Decide what to create next. Consider:
 - The audience's real pain points and interests
 - Platform norms (TikTok = entertainment-first, LinkedIn = value-first, X = hot takes, etc.)
 
+Declare exactly ONE primary emotional_target for this post from:
+recognition ("too real"), dark_laughter (coping humor), righteous_frustration
+(catharsis at the system), hope (earned sincerity — use sparingly), satisfaction
+(utility/sensory payoff), belonging (lore/insider status). Multi-emotion posts
+blur the message — pick the one this post exists to invoke.
+
 Return a single structured decision."""
 
 
@@ -230,9 +297,13 @@ def writer_system(product: dict, platform: str, plan, winner_examples: list[dict
     strat_brief = f"\nSTRATEGY BRIEF: {strategy.writer_brief}" if strategy and strategy.writer_brief else ""
     media_brief = f"\nMEDIA STYLE: {strategy.media_brief}" if strategy and strategy.media_brief else ""
     examples = strategy_examples_block(strategy)
+    knowledge = knowledge_block(product, strategy)
     char = character_block(character)
+    emotion = plan.emotional_target or "recognition"
     return f"""You are an elite copywriter creating a {plan.content_type} for {platform}.
-{strat}{strat_brief}{media_brief}{examples}{char}
+
+{COMMANDMENTS}
+{strat}{strat_brief}{media_brief}{examples}{knowledge}{char}
 
 PRODUCT: {product['name']} — {product['description']}
 BRAND VOICE: {product['brand_voice']}
@@ -244,6 +315,7 @@ CONTENT PLAN:
 - Angle: {plan.angle}
 - Hook style: {plan.hook_style}
 - Tone: {plan.tone}
+- Primary emotion to invoke: {emotion} (this post exists to make the viewer feel THIS)
 - Trend tie-in: {trend}
 
 TOP PERFORMING EXAMPLES ON THIS PLATFORM (emulate what works, do not copy):

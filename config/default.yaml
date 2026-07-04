@@ -13,32 +13,33 @@ llm:
   novelty_threshold: 0.93                # Cosine sim above which new content is "too similar" to recent posts
   novelty_lookback: 40                   # How many recent posts to compare against for novelty
 
+# Per-platform settings — informed by the 2026 playbooks (docs/research/MASTER-STRATEGY.md §4)
 platforms:
   tiktok:
     enabled: true
-    max_posts_per_day: 2
-    content_types: ["video"]
+    max_posts_per_day: 2               # quality gate over volume; ≥4h spacing
+    content_types: ["video", "carousel"]  # photo-mode carousels get 3-5x video reach
     optimal_times: ["11:00", "17:00", "20:00"]   # Refined over time by the bandit
-    hashtag_count: 5
+    hashtag_count: 4
     privacy_level: "PUBLIC_TO_EVERYONE"
   instagram:
     enabled: true
     max_posts_per_day: 2
     content_types: ["video", "carousel", "image"]
     optimal_times: ["08:00", "12:00", "17:00"]
-    hashtag_count: 15
+    hashtag_count: 5                   # hashtag walls are dead; ≤5 targeted
   x:
     enabled: true
-    max_posts_per_day: 3
+    max_posts_per_day: 5               # 3-5 originals/day is the growth cadence
     content_types: ["image", "text", "thread", "video"]
-    optimal_times: ["09:00", "12:00", "18:00"]
-    hashtag_count: 3
+    optimal_times: ["09:00", "11:30", "14:00", "16:30", "19:00"]
+    hashtag_count: 0                   # hashtags read as spam on X in 2026
   linkedin:
     enabled: true
-    max_posts_per_day: 1
-    content_types: ["text", "image", "carousel"]
+    max_posts_per_day: 1               # 4-5/week with 24h gaps
+    content_types: ["carousel", "image", "text"]  # PDF carousels = highest-reach format; video is the worst
     optimal_times: ["08:00", "16:00"]
-    hashtag_count: 5
+    hashtag_count: 3
   youtube:
     enabled: true
     max_posts_per_day: 1
@@ -46,15 +47,15 @@ platforms:
     optimal_times: ["12:00", "17:00"]
   bluesky:
     enabled: true
-    max_posts_per_day: 3
-    content_types: ["text", "image"]
-    optimal_times: ["09:00", "14:00", "19:00"]
+    max_posts_per_day: 1               # token presence; ≤1/day, text-first
+    content_types: ["text"]            # NEVER AI media here — blocklists are permanent
+    optimal_times: ["10:00"]
     hashtag_count: 0
   threads:
     enabled: true
-    max_posts_per_day: 2
+    max_posts_per_day: 3               # 2-3/day, conversation-ranked
     content_types: ["text", "image"]
-    optimal_times: ["10:00", "19:00"]
+    optimal_times: ["10:00", "14:00", "19:00"]
     hashtag_count: 0
 
 media:
@@ -92,6 +93,14 @@ trends:
   min_velocity: 0.0            # Skip falling trends (late meme = brand cringe)
   max_reactions_per_day: 2     # Per product — don't trend-jack everything
   react_platforms: []          # [] = all enabled platforms
+  fast_poll_minutes: 30        # Reddit rising / Bluesky / Google RSS poll interval
+  subreddits:                  # Niche subs: early trend signal AND content material
+    - recruitinghell
+    - internships
+    - jobs
+    - csMajors
+    - cscareerquestions
+    - college
 
 approval:
   auto_approve: false                    # Set true once you trust the output

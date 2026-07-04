@@ -63,6 +63,15 @@ def plan_content(
         plan.hook_style = bandit_picks["hook_style"]
     if bandit_picks.get("tone"):
         plan.tone = bandit_picks["tone"]
+    # One primary emotion per post. The strategy's target is the default; the
+    # strategist may pick another valid one; the bandit fills any gap.
+    from ..constants import EMOTIONAL_TARGETS
+
+    if plan.emotional_target not in EMOTIONAL_TARGETS:
+        plan.emotional_target = (
+            getattr(strategy, "emotional_target", "") if strategy else "")
+    if plan.emotional_target not in EMOTIONAL_TARGETS:
+        plan.emotional_target = bandit_picks.get("emotional_target") or "recognition"
     return plan
 
 

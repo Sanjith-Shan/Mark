@@ -23,6 +23,41 @@ posting_cadence:
   youtube: 1
   bluesky: 2
 
+# Strategy knowledge pools (docs/research/MASTER-STRATEGY.md).
+knowledge:
+  # pain-point-povs / meme-carousels / fake-text-drama draw from these.
+  # Refresh from r/recruitinghell + trends; narrow moments, never categories.
+  pain_veins:
+    - ghosting after 5 rounds of interviews
+    - '"entry level, 7 years experience" postings'
+    - the 45-minute AI personality test for a minimum-wage job
+    - interview-round inflation (round 8 culture-fit vibe check)
+    - rejection-email template parody ("we were impressed, however…")
+    - rejected by a company you don't remember applying to
+    - the Workday account made for one application in 2023
+    - re-type-your-resume-after-uploading-it portals
+    - '"open to work" ring despair'
+    - recruiter LinkedIn-speak ("i'm humbled to announce")
+    - ghost jobs reposted monthly since 2024
+    - the 2:47 AM automated rejection timestamp
+  # educational-hooks may ONLY cite claims from here (update quarterly).
+  fact_base:
+    - entry-level postings are down 35% year over year
+    - the average offer now takes 70+ applications ("application-maxxing")
+    - recruiters spend ~7.4 seconds on a first resume pass
+    - applying within 24 hours of a posting going live measurably raises reply rates
+    - 46% of Gen Z have secured a job or internship through TikTok
+    - most Fortune 500 companies use ATS keyword filtering before a human ever looks
+  # contrarian-takes may only target these whitelisted systems (never people).
+  take_pool:
+    - ATS black holes
+    - ghosting culture
+    - unpaid internships
+    - interview-round inflation
+    - cover letters as a loyalty test
+    - career-center advice that predates the internet
+    - credential inflation
+
 # Concrete artifacts of the audience's life — the humor engine's raw material.
 # Specific beats generic: every joke pulls from these. Keep this list alive.
 specificity_bank:

@@ -94,6 +94,11 @@ class TrendsConfig(_Base):
     min_velocity: float = 0.0           # min score delta vs last sighting (0 = new or rising)
     max_reactions_per_day: int = 2      # per product — trend-jacking everything is spam
     react_platforms: list[str] = Field(default_factory=list)  # [] = all enabled platforms
+    fast_poll_minutes: int = 30         # fast sources (Reddit rising / Bluesky / Google RSS)
+    subreddits: list[str] = Field(default_factory=lambda: [
+        "recruitinghell", "internships", "jobs", "csMajors",
+        "cscareerquestions", "college",
+    ])                                  # niche subs polled for rising posts (early-warning + material)
 
 
 class Settings(_Base):
@@ -128,6 +133,7 @@ class ProductConfig(_Base):
     posting_cadence: dict[str, int] = Field(default_factory=dict)
     strategies: Optional[list[str]] = None  # allowlist of strategy ids (None = all)
     specificity_bank: list[str] = Field(default_factory=list)  # concrete audience-life artifacts (humor fuel)
+    knowledge: dict[str, list[str]] = Field(default_factory=dict)  # pain_veins / fact_base / take_pool
 
 
 # --------------------------------------------------------------------------- #

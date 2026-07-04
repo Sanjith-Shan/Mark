@@ -76,7 +76,51 @@ def _decode(row: Optional[dict]) -> Optional[dict]:
     if row is None:
         return None
     row["catchphrases"] = db_module.loads(row.get("catchphrases"), []) or []
+    row["lore_state"] = db_module.loads(row.get("lore_state"), {}) or {}
     return row
+
+
+# --------------------------------------------------------------------------- #
+# Config sync (config/characters/*.yaml → characters table)
+# --------------------------------------------------------------------------- #
+def sync_from_config(app: App) -> list[dict]:
+    """Upsert character bibles from ``config/characters/*.yaml`` (keyed by
+    product_id + name). YAML is the bible; DB rows carry live lore state — an
+    existing row keeps its lore_state and reference_image."""
+    import yaml
+
+    char_dir = app.paths.config_dir / "characters"
+    if not char_dir.exists():
+        return []
+    synced = []
+    for path in sorted(char_dir.glob("*.yaml")):
+        try:
+            raw = yaml.safe_load(path.read_text()) or {}
+        except Exception:
+            continue
+        if not raw.get("product_id") or not raw.get("name"):
+            continue
+        existing = db_module.query_one(
+            app.conn,
+            "SELECT * FROM characters WHERE product_id = ? AND name = ?",
+            (raw["product_id"], raw["name"]))
+        fields = dict(
+            role=raw.get("role") or "ambassador",
+            persona=(raw.get("persona") or "").strip(),
+            visual_desc=(raw.get("visual_desc") or "").strip(),
+            voice=raw.get("voice"),
+            catchphrases=raw.get("catchphrases") or [],
+            active=1 if raw.get("active", True) else 0,
+        )
+        if existing:
+            db_module.update(app.conn, "characters", existing["id"], **fields)
+            synced.append(get(app, existing["id"]))
+        else:
+            cid = db_module.insert(app.conn, "characters",
+                                   product_id=raw["product_id"], name=raw["name"],
+                                   lore_state=raw.get("lore_state") or {}, **fields)
+            synced.append(get(app, cid))
+    return [s for s in synced if s]
 
 
 # --------------------------------------------------------------------------- #
@@ -123,4 +167,12 @@ def resolve_for_content(app: App, product: dict, strategy) -> Optional[dict]:
     """The character to front this piece of content, if the strategy calls for one."""
     if strategy is None or not getattr(strategy, "uses_character", False):
         return None
-    return active_character(app, product["id"])
+    character = active_character(app, product["id"])
+    if character is None:
+        # Lazy first-run sync from config/characters/*.yaml.
+        try:
+            sync_from_config(app)
+        except Exception:
+            return None
+        character = active_character(app, product["id"])
+    return character

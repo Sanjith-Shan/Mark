@@ -108,8 +108,13 @@ def _mock_comments(app: App, post: dict) -> list[dict]:
 
 
 def _engagement_rate(m: dict) -> float:
+    """Weighted engagement per view. Shares and saves are weighted 2x likes:
+    2025-26 ranking signals put sends/saves far above likes on every short-form
+    platform (they predict distribution; likes barely do) — see
+    docs/research/strategy-frameworks.md 'Measurement'."""
     views = max(m.get("views", 0), 1)
-    interactions = m.get("likes", 0) + m.get("comments", 0) + m.get("shares", 0) + m.get("saves", 0)
+    interactions = (m.get("likes", 0) + m.get("comments", 0)
+                    + 2 * m.get("shares", 0) + 2 * m.get("saves", 0))
     return round(interactions / views, 5)
 
 

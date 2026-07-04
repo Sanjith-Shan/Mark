@@ -17,7 +17,8 @@ import numpy as np
 
 from .. import db as db_module
 from ..app import App
-from ..constants import HOOK_STYLES, HUMOR_MECHANISMS, HUMOR_PERSONAS, TONES
+from ..constants import (EMOTIONAL_TARGETS, HOOK_STYLES, HUMOR_MECHANISMS,
+                         HUMOR_PERSONAS, TONES)
 
 _rng = np.random.default_rng()
 
@@ -37,6 +38,7 @@ def candidate_values(app: App, platform: str) -> dict[str, list[str]]:
         "post_time": pconf.optimal_times or ["12:00"],
         "humor_mechanism": HUMOR_MECHANISMS,
         "humor_persona": HUMOR_PERSONAS,
+        "emotional_target": EMOTIONAL_TARGETS,
     }
     strategy_ids = strategies_mod.candidate_ids(app, platform)
     if strategy_ids:
@@ -104,6 +106,7 @@ def update_from_content(app: App, content: dict, reward: float,
         "strategy": sctx.get("strategy"),
         "humor_mechanism": sctx.get("humor_mechanism"),
         "humor_persona": sctx.get("humor_persona"),
+        "emotional_target": sctx.get("emotional_target"),
     }
     for arm_type, value in mapping.items():
         if value:

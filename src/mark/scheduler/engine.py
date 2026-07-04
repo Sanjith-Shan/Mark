@@ -74,6 +74,7 @@ def job_post_platform(app: App, platform: str) -> None:
         app.conn,
         "SELECT c.* FROM content c JOIN products pr ON pr.id = c.product_id "
         "WHERE c.status = 'approved' AND c.platform = ? "
+        "AND (c.expires_at IS NULL OR c.expires_at > datetime('now')) "
         "AND pr.active = 1 AND COALESCE(pr.archived, 0) = 0 "
         "ORDER BY c.created_at ASC LIMIT 1", (platform,))
     if not row:
@@ -99,7 +100,22 @@ def job_trends(app: App, llm: LLM) -> None:
         # trend-riding content immediately instead of waiting for tomorrow's cron.
         if app.settings.trends.auto_react:
             _safe(aggregator.react, app, llm, product)
+    _safe(aggregator.expire_stale_content, app)
     log.info("refreshed trends")
+
+
+def job_trends_fast(app: App, llm: LLM) -> None:
+    """The 30-minute pulse: free, hours-fresh sources only (Reddit rising,
+    Bluesky trending, Google RSS). Auto-react fires from here too — this is
+    where detection→live in 2-6 hours actually happens."""
+    from ..trends import aggregator
+
+    for product in _active_products(app):
+        _safe(aggregator.refresh_fast, app, llm, product)
+        if app.settings.trends.auto_react:
+            _safe(aggregator.react, app, llm, product)
+    _safe(aggregator.expire_stale_content, app)
+    log.info("fast trend poll done")
 
 
 def job_post_scheduled(app: App) -> None:
@@ -112,6 +128,7 @@ def job_post_scheduled(app: App) -> None:
         "SELECT c.* FROM content c JOIN products pr ON pr.id = c.product_id "
         "WHERE c.status = 'approved' AND c.scheduled_at IS NOT NULL "
         "AND c.scheduled_at <= datetime('now') "
+        "AND (c.expires_at IS NULL OR c.expires_at > datetime('now')) "
         "AND pr.active = 1 AND COALESCE(pr.archived, 0) = 0 "
         "ORDER BY c.scheduled_at ASC")
     for row in rows:
@@ -205,6 +222,12 @@ def build_scheduler(app: App, llm: LLM, *, blocking: bool = True,
 
     sched.add_job(_job(job_post_scheduled), IntervalTrigger(minutes=5, timezone=tz),
                   id="post-scheduled", name="post user-scheduled content")
+
+    # Fast trend pulse (free sources only) — real-time trend adaptation.
+    fast_min = max(10, int(getattr(app.settings.trends, "fast_poll_minutes", 30)))
+    sched.add_job(_job(job_trends_fast, needs_llm=True),
+                  IntervalTrigger(minutes=fast_min, timezone=tz),
+                  id="trends-fast", name="fast trend poll")
 
     # One posting job per (platform, optimal_time), with ± jitter to avoid bot
     # patterns and to spread posts out.

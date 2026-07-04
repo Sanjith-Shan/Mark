@@ -29,6 +29,18 @@ HUMOR_PERSONAS = [
     "unhinged_ai",           # self-aware machine identity played as the bit
 ]
 
+# The six emotions worth targeting (docs/research/MASTER-STRATEGY.md §3) — each
+# post declares exactly ONE primary emotion; multi-emotion posts blur the CTA
+# and the bandit signal.
+EMOTIONAL_TARGETS = [
+    "recognition",           # "too real" — hyper-specific shared experience
+    "dark_laughter",         # coping humor; pain IS the punchline
+    "righteous_frustration", # catharsis at the system's absurdity (never at people)
+    "hope",                  # earned sincerity — rare enough to hit (~15% of content)
+    "satisfaction",          # sensory/utility payoff; demos, tips, satisfying loops
+    "belonging",             # lore, callbacks, insider status
+]
+
 # The discrete choices the bandit optimizes.
 ARM_TYPES = ["hook_style", "content_type", "tone", "post_time", "strategy",
-             "humor_mechanism", "humor_persona"]
+             "humor_mechanism", "humor_persona", "emotional_target"]

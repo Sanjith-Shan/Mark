@@ -209,7 +209,11 @@ MIGRATIONS: list[tuple[str, str, str]] = [
     ("trends", "style_notes", "TEXT"),         # LLM analysis of the trend's format/style/audio
     ("products", "strategies", "TEXT"),        # JSON allowlist of strategy ids (null = all)
     ("trends", "velocity", "REAL"),            # score delta vs previous sighting (None = first sighting)
+    ("trends", "stage", "TEXT"),               # lifecycle: "new", "rising", "mature", "declining"
     ("products", "specificity_bank", "TEXT"),  # JSON: concrete audience-life artifacts fueling humor
+    ("products", "knowledge", "TEXT"),         # JSON: {pain_veins: [], fact_base: [], take_pool: []}
+    ("characters", "lore_state", "TEXT"),      # JSON: running counters, NPCs, active arcs
+    ("content", "expires_at", "TIMESTAMP"),    # trend content TTL — never post a dead meme
 ]
 
 

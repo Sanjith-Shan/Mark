@@ -21,6 +21,7 @@ class ContentPlan(BaseModel):
     angle: str
     hook_style: str            # "question", "bold_claim", "story", "statistic", "pain_point", "before_after"
     tone: str                  # "funny", "educational", "inspirational", "relatable", "controversial"
+    emotional_target: str = ""  # ONE primary emotion (constants.EMOTIONAL_TARGETS)
     trend_tie_in: Optional[str] = None
     reasoning: str = ""
 

@@ -191,7 +191,8 @@ def generate_one(app: App, llm: LLM, product: dict, platform: str,
 
     strategy_context = {
         "topic": plan.topic, "angle": plan.angle, "hook_style": plan.hook_style,
-        "tone": plan.tone, "trend_tie_in": plan.trend_tie_in, "reasoning": plan.reasoning,
+        "tone": plan.tone, "emotional_target": plan.emotional_target,
+        "trend_tie_in": plan.trend_tie_in, "reasoning": plan.reasoning,
         "novelty_max_sim": round(novelty.max_sim, 4),
         "bandit_picks": ctx["bandit_picks"],
         "strategy": strategy.id if strategy else None,
@@ -229,7 +230,8 @@ def generate_one(app: App, llm: LLM, product: dict, platform: str,
     db_module.log_activity(app.conn, "generate",
                            f"Drafted {plan.content_type} for {platform}: “{draft.hook}”",
                            product_id=product["id"], content_id=content_id)
-    _maybe_auto_approve(app, content_id, plan.content_type)
+    if not (strategy and strategy.never_auto_approve):
+        _maybe_auto_approve(app, content_id, plan.content_type)
     return store.get_content(app.conn, content_id)
 
 
