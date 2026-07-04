@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import { useGlobal } from "../store";
-import { PLATFORM_LABELS } from "../types";
+import { ALL_PLATFORMS, PLATFORM_LABELS } from "../types";
 import { Card, Empty, Pill, Spinner, Switch, fmt } from "../components/ui";
 
 interface LlmSettings {
@@ -32,11 +32,31 @@ interface ApprovalSettings {
   auto_approve: boolean;
   auto_approve_types: string[];
 }
+interface HumorSettings {
+  enabled: boolean;
+  candidates: number;
+  candidates_light: number;
+  min_violation: number;
+  min_benignness: number;
+  predictability_filter: boolean;
+  model: string;
+}
+interface TrendsSettings {
+  auto_react: boolean;
+  react_threshold: number;
+  min_velocity: number;
+  max_reactions_per_day: number;
+  react_platforms: string[];
+  fast_poll_minutes: number;
+  subreddits: string[];
+}
 interface AllSettings {
   llm?: Partial<LlmSettings>;
   media?: Partial<MediaSettings>;
   scheduling?: Partial<SchedulingSettings>;
   approval?: Partial<ApprovalSettings>;
+  humor?: Partial<HumorSettings>;
+  trends?: Partial<TrendsSettings>;
   upload_post?: { profile_username?: string };
 }
 interface SettingsResp {

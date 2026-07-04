@@ -301,8 +301,9 @@ def recent_trends(app: App, platform: Optional[str] = None, limit: int = 10,
                   max_age_hours: int = 48) -> list[dict]:
     rows = db_module.query(
         app.conn,
-        "SELECT source, topic, trend_score, metadata, style_notes, velocity, collected_at "
-        "FROM trends WHERE collected_at >= datetime('now', ?) ORDER BY trend_score DESC",
+        "SELECT source, topic, trend_score, metadata, style_notes, velocity, stage, "
+        "collected_at FROM trends WHERE collected_at >= datetime('now', ?) "
+        "ORDER BY trend_score DESC",
         (f"-{int(max_age_hours)} hours",),
     )
     # Dedupe by topic keeping the highest score; lightly boost source match.

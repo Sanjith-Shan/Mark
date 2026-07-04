@@ -82,12 +82,15 @@ export function Switch(props: { checked: boolean; onChange: (v: boolean) => void
   );
 }
 
-export function timeAgo(ts: string): string {
-  // Server timestamps are UTC ("YYYY-MM-DD HH:MM:SS") — parse them as such.
+/** Server timestamps are UTC ("YYYY-MM-DD HH:MM:SS") — parse them as such. */
+export function parseUtc(ts: string): Date {
   let iso = ts.includes("T") ? ts : ts.replace(" ", "T");
   if (!/Z|[+-]\d{2}:?\d{2}$/.test(iso)) iso += "Z";
-  const t = new Date(iso);
-  const secs = Math.max(0, (Date.now() - t.getTime()) / 1000);
+  return new Date(iso);
+}
+
+export function timeAgo(ts: string): string {
+  const secs = Math.max(0, (Date.now() - parseUtc(ts).getTime()) / 1000);
   if (secs < 60) return "just now";
   if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
   if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;

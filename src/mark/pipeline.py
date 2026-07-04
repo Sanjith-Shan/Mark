@@ -329,6 +329,61 @@ def rewrite_content(app: App, llm: LLM, content_id: int,
     return store.get_content(app.conn, content_id)
 
 
+def adapt_content(app: App, llm: LLM, source_content_id: int,
+                  target_platform: str) -> dict:
+    """Cross-platform cascade: re-express a winning post natively for another
+    platform (the distribution ladder — e.g. a TikTok winner gets its Reels
+    second life 2-4 days later). Never identical text; media regenerated to the
+    target platform's specs."""
+    from . import characters as characters_mod
+    from . import db as db_module
+    from . import strategies as strategies_mod
+
+    source = store.get_content(app.conn, source_content_id)
+    if not source:
+        raise ValueError(f"content {source_content_id} not found")
+    product = store.get_product(app.conn, source["product_id"])
+    sctx = db_module.loads(source.get("strategy_context"), {}) or {}
+    strategy = strategies_mod.get(sctx.get("strategy") or "")
+    character = characters_mod.get(app, sctx["character_id"]) if sctx.get("character_id") else None
+
+    plan = _plan_from_content(source)
+    plan.platform = target_platform
+    allowed = app.settings.platform(target_platform).content_types or ["text"]
+    if plan.content_type not in allowed:
+        plan.content_type = allowed[0]
+
+    instruction = (
+        f"This adapts a post that performed exceptionally well on {source['platform']}. "
+        f"Keep the winning idea and hook mechanics; re-express it NATIVELY for "
+        f"{target_platform} (its rules below). Never reuse the same wording.\n"
+        f"ORIGINAL HOOK: {source['hook']}\nORIGINAL CAPTION: {(source['caption'] or '')[:400]}")
+    draft = writer.write_content(app, llm, product, target_platform, plan,
+                                 user_feedback=[instruction],
+                                 strategy=strategy, character=character)
+
+    new_sctx = {**sctx, "cascaded_from": source_content_id,
+                "cascade_source_platform": source["platform"]}
+    content_id = store.insert_content(
+        app.conn, product_id=product["id"], platform=target_platform,
+        content_type=plan.content_type, caption=draft.caption,
+        hashtags=draft.hashtags, hook=draft.hook, media_paths=[], media_urls=[],
+        strategy_context=new_sctx, status="draft", draft=draft.model_dump())
+    media = _produce_media_with_fallback(app, llm, product, content_id, plan, draft,
+                                         character=character)
+    store.set_content_status(app.conn, content_id, "draft",
+                             content_type=plan.content_type,
+                             media_paths=media["media_paths"],
+                             media_urls=media["media_urls"])
+    db_module.log_activity(
+        app.conn, "cascade",
+        f"Cascaded winner #{source_content_id} ({source['platform']}) → {target_platform}",
+        product_id=product["id"], content_id=content_id, level="success")
+    if not (strategy and strategy.never_auto_approve):
+        _maybe_auto_approve(app, content_id, plan.content_type)
+    return store.get_content(app.conn, content_id)
+
+
 def _produce_media_with_fallback(app, llm, product, content_id, plan, draft,
                                  character: Optional[dict] = None) -> dict:
     try:

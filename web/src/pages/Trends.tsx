@@ -9,13 +9,23 @@ export default function Trends() {
   const { campaigns, jobsDoneVersion, runJob } = useGlobal();
   const [campaign, setCampaign] = useState("");
   const [trends, setTrends] = useState<Trend[]>([]);
+  const [hot, setHot] = useState<Trend[]>([]);
 
-  const load = () => api.get<Trend[]>("/api/trends?limit=30").then(setTrends).catch(() => {});
+  const load = () => {
+    api.get<Trend[]>("/api/trends?limit=30").then(setTrends).catch(() => {});
+    api.get<Trend[]>("/api/trends/hot?limit=5").then(setHot).catch(() => {});
+  };
   useEffect(() => { load(); }, []);
   useEffect(() => {
-    // reload once a trends refresh job finishes (edge-triggered)
+    // reload once a trends refresh/react job finishes (edge-triggered)
     if (jobsDoneVersion > 0) load();
   }, [jobsDoneVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const ride = (t: Trend) =>
+    runJob(() => api.post<{ job_id: string }>("/api/trends/react", {
+      topic: t.topic,
+      campaign_id: campaign || undefined,
+    }));
 
   return (
     <>
@@ -33,6 +43,41 @@ export default function Trends() {
         </button>
       </div>
 
+      {hot.length > 0 && (
+        <Card title="Hot right now"
+          action={<span className="small faint">fresh + rising + relevant — the window to ride these is short</span>}>
+          <div className="stack" style={{ gap: 0 }}>
+            {hot.map((t, i) => (
+              <div key={`${t.source}-${t.topic}-${i}`} className="row wrap"
+                style={{ padding: "11px 0", borderBottom: i < hot.length - 1 ? "1px solid var(--border)" : undefined }}>
+                <div style={{ flex: 1, minWidth: 220 }}>
+                  <div className="row wrap" style={{ gap: 8 }}>
+                    <span style={{ fontWeight: 600 }}>{t.topic}</span>
+                    <StageBadge stage={t.stage} />
+                    <VelocityArrow velocity={t.velocity} />
+                    {t.metadata?.safe === false && <UnsafeMark />}
+                  </div>
+                  {t.metadata?.sound_dependent === true && (
+                    <div className="small faint" style={{ marginTop: 3 }}>
+                      🔇 needs native sound — manual post
+                    </div>
+                  )}
+                  {t.style_notes && (
+                    <div className="small muted" style={{ fontStyle: "italic", marginTop: 3 }}>
+                      {t.style_notes}
+                    </div>
+                  )}
+                </div>
+                <button className="btn primary sm" onClick={() => ride(t)}
+                  title="Draft trend-riding content for this topic right now">
+                  🏄 Ride this trend
+                </button>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       <Card title="Trending now">
         {trends.length === 0 ? (
           <Empty icon="🔥" title="No trend data yet"
@@ -49,10 +94,18 @@ export default function Trends() {
                     {t.source === "tiktok"
                       ? <Pill kind="accent">tiktok</Pill>
                       : <Pill>{t.source}</Pill>}
+                    <StageBadge stage={t.stage} />
+                    <VelocityArrow velocity={t.velocity} />
+                    {t.metadata?.safe === false && <UnsafeMark />}
                     {t.metadata?.fallback === true && (
                       <span className="pill faint" style={{ fontSize: 10.5, padding: "1px 7px" }}>evergreen</span>
                     )}
                   </div>
+                  {t.metadata?.sound_dependent === true && (
+                    <div className="small faint" style={{ marginTop: 3 }}>
+                      🔇 needs native sound — manual post
+                    </div>
+                  )}
                   {t.style_notes && (
                     <div className="small muted" style={{ fontStyle: "italic", marginTop: 3 }}>
                       How it's executed: {t.style_notes}
@@ -85,4 +138,31 @@ export default function Trends() {
 function relevance(t: Trend): number | null {
   const r = t.metadata?.relevance;
   return typeof r === "number" ? r : null;
+}
+
+function StageBadge({ stage }: { stage?: Trend["stage"] }) {
+  if (!stage) return null;
+  return <Pill kind={`stage-${stage}`}>{stage}</Pill>;
+}
+
+function VelocityArrow({ velocity }: { velocity?: number | null }) {
+  if (velocity == null) return null;
+  const up = velocity > 0.01;
+  const down = velocity < -0.01;
+  return (
+    <span className="small" title={`velocity ${velocity.toFixed(3)}/hr`}
+      style={{
+        fontWeight: 700,
+        color: up ? "var(--green)" : down ? "var(--red)" : "var(--text-faint)",
+      }}>
+      {up ? "↑" : down ? "↓" : "→"}
+    </span>
+  );
+}
+
+function UnsafeMark() {
+  return (
+    <span className="small faint" title="Flagged as not brand-safe — Mark won't auto-react to this one"
+      style={{ cursor: "help" }}>⚠</span>
+  );
 }

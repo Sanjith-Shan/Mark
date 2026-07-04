@@ -485,9 +485,10 @@ def humor_fanout_user(plan, draft) -> str:
     return base + "\n\nWrite the candidates now — one per persona."
 
 
-def pairwise_judge_system(product: dict, platform: str) -> str:
+def pairwise_judge_system(product: dict, platform: str, calibration: str = "") -> str:
     return f"""You judge which of two comedy drafts is FUNNIER for {product['name']} on {platform}.
 Audience: {product['target_audience']}
+{calibration}
 
 Compare PAIRWISE (never absolute scores). The funnier draft is the one with:
 - a genuine violation (something actually wrong/absurd, not humor-shaped blandness)

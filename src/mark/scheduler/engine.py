@@ -139,6 +139,58 @@ def job_post_scheduled(app: App) -> None:
         log.info("posted scheduled content %s to %s", row["id"], platform)
 
 
+# Winners on a source platform get a second life on lagged platforms — the
+# platform-lag arbitrage from the research (Reels trends run 3-7 days behind
+# TikTok; every TikTok winner deserves a Reels/Shorts retry, X winners a
+# Threads echo).
+CASCADE_LADDER = {"tiktok": ["instagram", "youtube"], "x": ["threads"]}
+
+
+def job_cascade(app: App, llm: LLM) -> None:
+    """Daily: find posts from 2-5 days ago that beat their platform baseline by
+    ≥1.5x and re-express them natively on the ladder's lagged platforms."""
+    from .. import pipeline
+
+    for product in _active_products(app):
+        for src_platform, targets in CASCADE_LADDER.items():
+            rows = db_module.query(
+                app.conn,
+                """
+                SELECT c.id, m.engagement_rate,
+                       (SELECT AVG(m3.engagement_rate) FROM metrics m3
+                        JOIN posts p3 ON p3.id = m3.post_id
+                        JOIN content c3 ON c3.id = p3.content_id
+                        WHERE c3.platform = ? AND c3.product_id = ?) AS baseline
+                FROM content c
+                JOIN posts p ON p.content_id = c.id
+                JOIN metrics m ON m.post_id = p.id
+                WHERE c.product_id = ? AND c.platform = ? AND c.status = 'posted'
+                  AND p.posted_at BETWEEN datetime('now', '-5 days')
+                                      AND datetime('now', '-2 days')
+                  AND m.id = (SELECT m2.id FROM metrics m2 WHERE m2.post_id = p.id
+                              ORDER BY m2.collected_at DESC LIMIT 1)
+                ORDER BY m.engagement_rate DESC LIMIT 3
+                """,
+                (src_platform, product["id"], product["id"], src_platform))
+            for row in rows:
+                baseline = row["baseline"] or 0.0
+                if baseline <= 0 or (row["engagement_rate"] or 0) < 1.5 * baseline:
+                    continue
+                for target in targets:
+                    if not app.settings.platform(target).enabled:
+                        continue
+                    # Skip when this winner already cascaded to this target.
+                    dup = db_module.query_one(
+                        app.conn,
+                        "SELECT id FROM content WHERE platform = ? "
+                        "AND strategy_context LIKE ?",
+                        (target, f'%"cascaded_from": {row["id"]}%'))
+                    if dup:
+                        continue
+                    _safe(pipeline.adapt_content, app, llm, row["id"], target)
+    log.info("cascade pass done")
+
+
 def job_feedback(app: App, llm: LLM) -> None:
     from ..learning import feedback
 
@@ -228,6 +280,11 @@ def build_scheduler(app: App, llm: LLM, *, blocking: bool = True,
     sched.add_job(_job(job_trends_fast, needs_llm=True),
                   IntervalTrigger(minutes=fast_min, timezone=tz),
                   id="trends-fast", name="fast trend poll")
+
+    # Daily winner cascade (platform-lag arbitrage).
+    sched.add_job(_job(job_cascade, needs_llm=True),
+                  CronTrigger.from_crontab("30 9 * * *", timezone=tz),
+                  id="cascade", name="cascade winners cross-platform")
 
     # One posting job per (platform, optimal_time), with ± jitter to avoid bot
     # patterns and to spread posts out.

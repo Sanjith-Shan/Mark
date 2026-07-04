@@ -57,12 +57,23 @@ export interface Content {
     trend_tie_in?: string | null;
     reasoning?: string;
     novelty_max_sim?: number;
+    strategy?: string;
+    strategy_name?: string;
+    episode?: number | null;
+    emotional_target?: string;
+    humor_mechanism?: string | null;
+    humor_persona?: string | null;
+    character_id?: number | null;
+    character?: string | null;
+    forced_trend?: string | null;
   };
   draft: Draft;
   status: string;
   rejection_feedback: string | null;
   error: string | null;
   scheduled_at: string | null;
+  /** Trend content TTL (UTC) — auto-rejects past this time. */
+  expires_at?: string | null;
   created_at: string;
   approved_at: string | null;
   posted_at: string | null;
@@ -138,13 +149,56 @@ export interface Status {
   timezone: string;
 }
 
+export type TrendStage = "new" | "rising" | "mature" | "declining";
+
 export interface Trend {
   source: string;
   topic: string;
   trend_score: number;
+  /** may contain: safe (bool), sound_dependent (bool), relevance (number) */
   metadata: Record<string, unknown>;
   style_notes?: string | null;
+  velocity?: number | null;
+  stage?: TrendStage | null;
   collected_at: string;
+}
+
+export interface Strategy {
+  id: string;
+  name: string;
+  description: string;
+  emotional_target: string;
+  /** platform -> adaptation note ("" = native fit) */
+  platforms: Record<string, string>;
+  content_types: string[];
+  humor_level: "none" | "light" | "full";
+  uses_character: boolean;
+  series_format: string | null;
+  example_sketches: string[];
+  mix_weight: number;
+  never_auto_approve: boolean;
+  /** per-campaign: on the selected campaign's allowlist (null allowlist = all) */
+  enabled: boolean;
+  /** count of content generated under this strategy for the campaign */
+  usage?: number;
+  /** next episode number, for series strategies */
+  episode?: number | null;
+}
+
+export interface Character {
+  id: number;
+  product_id: string;
+  name: string;
+  role: string;
+  persona: string;
+  visual_desc: string;
+  voice: string | null;
+  catchphrases: string[];
+  reference_image: string | null;
+  reference_url: string | null;
+  active: number;
+  lore_state: Record<string, unknown>;
+  created_at: string;
 }
 
 export interface SeriesPoint {

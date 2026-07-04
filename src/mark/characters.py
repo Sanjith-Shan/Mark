@@ -163,6 +163,21 @@ def scene_prompt(character: dict, scene: str) -> str:
             f"identical face, hair and outfit. Scene: {scene}")
 
 
+def on_episode_approved(app: App, character_id: int) -> None:
+    """Advance the character's lore when an episode is approved — the universe
+    must move forward or callbacks have nothing to call back to."""
+    character = get(app, character_id)
+    if not character:
+        return
+    lore = character.get("lore_state") or {}
+    lore["episodes_posted"] = int(lore.get("episodes_posted") or 0) + 1
+    # The signature counter (e.g. Poli's applications_submitted) creeps upward.
+    for key in ("applications_submitted", "applications_rejected"):
+        if key in lore and isinstance(lore[key], int):
+            lore[key] += 1 + (lore["episodes_posted"] % 7)
+    db_module.update(app.conn, "characters", character_id, lore_state=lore)
+
+
 def resolve_for_content(app: App, product: dict, strategy) -> Optional[dict]:
     """The character to front this piece of content, if the strategy calls for one."""
     if strategy is None or not getattr(strategy, "uses_character", False):

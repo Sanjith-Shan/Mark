@@ -325,6 +325,15 @@ def build_router(rt: Runtime) -> APIRouter:
         db_module.log_activity(app.conn, "approve", f"Approved content #{content_id}",
                                product_id=row["product_id"], content_id=content_id,
                                level="success")
+        # Character episodes advance the lore on approval.
+        sctx = db_module.loads(row.get("strategy_context"), {}) or {}
+        if sctx.get("character_id"):
+            from .. import characters as characters_mod
+
+            try:
+                characters_mod.on_episode_approved(app, sctx["character_id"])
+            except Exception:
+                pass
         rt.bus.publish("content", {"id": content_id, "status": "approved"})
         return content_out(get_content_or_404(content_id))
 
@@ -588,6 +597,158 @@ def build_router(rt: Runtime) -> APIRouter:
         job = rt.jobs.submit("trends", "Refresh trends", _run, product_id=product["id"])
         return {"job_id": job.id}
 
+    @r.get("/trends/hot")
+    def hot_trends(limit: int = 5) -> list[dict]:
+        from ..trends import aggregator
+
+        return aggregator.hot_trends(rt.app(), limit=limit, for_auto_react=False)
+
+    class ReactIn(BaseModel):
+        campaign_id: Optional[str] = None
+        topic: Optional[str] = None            # default: hottest qualifying trend
+        platforms: Optional[list[str]] = None  # default: config react_platforms/all
+
+    @r.post("/trends/react")
+    def react_to_trend(body: ReactIn) -> dict:
+        app = rt.app()
+        product = store.resolve_product(app.conn, body.campaign_id)
+        if not product:
+            raise HTTPException(400, "no campaign to react for")
+        from ..trends import aggregator
+
+        trend = None
+        if body.topic:
+            for t in aggregator.recent_trends(app, limit=100, max_age_hours=48):
+                if t["topic"].strip().lower() == body.topic.strip().lower():
+                    trend = t
+                    break
+            if trend is None:
+                raise HTTPException(404, f"trend “{body.topic}” not found in recent trends")
+
+        def _run(app, llm, job, report):
+            report(0.1, "Riding the trend…")
+            rows = aggregator.react(app, llm, product, trend=trend,
+                                    platforms=body.platforms)
+            for row in rows:
+                rt.bus.publish("content", {"id": row["id"], "status": row["status"]})
+            report(1.0, f"Drafted {len(rows)} trend posts")
+            return {"created": [row["id"] for row in rows]}
+
+        label = f"React to “{(trend or {}).get('topic', 'hottest trend')}”"
+        job = rt.jobs.submit("trends", label, _run, product_id=product["id"])
+        return {"job_id": job.id}
+
+    # ------------------------------------------------------------------ #
+    # Strategies
+    # ------------------------------------------------------------------ #
+    @r.get("/strategies")
+    def strategies_catalog(campaign: Optional[str] = None) -> list[dict]:
+        from .. import strategies as strategies_mod
+
+        app = rt.app()
+        product = store.resolve_product(app.conn, campaign)
+        allowlist = strategies_mod.product_allowlist(product) if product else None
+        out = []
+        for s in strategies_mod.STRATEGIES:
+            d = s.model_dump()
+            d["enabled"] = (allowlist is None) or (s.id in allowlist)
+            if product:
+                d["episode"] = strategies_mod.episode_number(
+                    app, product, "", s) if s.series_format else None
+                d["usage"] = db_module.query_one(
+                    app.conn,
+                    "SELECT COUNT(*) AS n FROM content WHERE product_id = ? "
+                    "AND strategy_context LIKE ?",
+                    (product["id"], f'%"strategy": "{s.id}"%'))["n"]
+            out.append(d)
+        return out
+
+    class StrategiesIn(BaseModel):
+        strategies: Optional[list[str]] = None  # null = all enabled
+
+    @r.patch("/campaigns/{product_id}/strategies")
+    def set_campaign_strategies(product_id: str, body: StrategiesIn) -> dict:
+        from .. import strategies as strategies_mod
+
+        app = rt.app()
+        get_product_or_404(product_id)
+        if body.strategies is not None:
+            unknown = [s for s in body.strategies if not strategies_mod.get(s)]
+            if unknown:
+                raise HTTPException(400, f"unknown strategies: {', '.join(unknown)}")
+        store.update_product(app.conn, product_id,
+                             strategies=body.strategies if body.strategies else None)
+        db_module.log_activity(app.conn, "edit",
+                               "Updated strategy allowlist", product_id=product_id)
+        return product_out(get_product_or_404(product_id))
+
+    # ------------------------------------------------------------------ #
+    # Characters (AI ambassadors)
+    # ------------------------------------------------------------------ #
+    def character_out(c: dict) -> dict:
+        out = dict(c)
+        ref = c.get("reference_image")
+        out["reference_url"] = media_url(ref) if ref else None
+        return out
+
+    @r.get("/characters")
+    def characters_list(campaign: Optional[str] = None) -> list[dict]:
+        from .. import characters as characters_mod
+
+        app = rt.app()
+        product = store.resolve_product(app.conn, campaign)
+        if not product:
+            return []
+        rows = characters_mod.list_for_product(app, product["id"], include_inactive=True)
+        return [character_out(c) for c in rows]
+
+    @r.post("/characters/sync")
+    def characters_sync() -> list[dict]:
+        from .. import characters as characters_mod
+
+        synced = characters_mod.sync_from_config(rt.app())
+        return [character_out(c) for c in synced]
+
+    class CharacterPatch(BaseModel):
+        persona: Optional[str] = None
+        visual_desc: Optional[str] = None
+        voice: Optional[str] = None
+        catchphrases: Optional[list[str]] = None
+        active: Optional[bool] = None
+
+    @r.patch("/characters/{character_id}")
+    def patch_character(character_id: int, body: CharacterPatch) -> dict:
+        from .. import characters as characters_mod
+
+        app = rt.app()
+        if not characters_mod.get(app, character_id):
+            raise HTTPException(404, "character not found")
+        fields = {k: v for k, v in body.model_dump().items() if v is not None}
+        if "active" in fields:
+            fields["active"] = 1 if fields["active"] else 0
+        out = characters_mod.update(app, character_id, **fields)
+        return character_out(out)
+
+    @r.post("/characters/{character_id}/sheet")
+    def generate_sheet(character_id: int) -> dict:
+        from .. import characters as characters_mod
+
+        character = characters_mod.get(rt.app(), character_id)
+        if not character:
+            raise HTTPException(404, "character not found")
+
+        def _run(app, llm, job, report):
+            report(0.2, f"Generating reference sheet for {character['name']}…")
+            # Force regeneration: clear the stored path first.
+            db_module.update(app.conn, "characters", character_id, reference_image=None)
+            fresh = characters_mod.get(app, character_id)
+            path = characters_mod.ensure_reference_image(app, llm, fresh)
+            return {"reference_image": str(path)}
+
+        job = rt.jobs.submit("media", f"Character sheet: {character['name']}", _run,
+                             product_id=character["product_id"])
+        return {"job_id": job.id}
+
     @r.get("/insights")
     def insights(campaign: Optional[str] = None) -> dict:
         app = rt.app()
@@ -733,7 +894,7 @@ def build_router(rt: Runtime) -> APIRouter:
                 "profile_username": app.settings.upload_post.profile_username}
 
     ALLOWED_SETTINGS_SECTIONS = {"llm", "media", "scheduling", "approval",
-                                 "upload_post", "platforms"}
+                                 "upload_post", "platforms", "trends", "humor"}
 
     class SettingsPatch(BaseModel):
         settings: dict[str, Any]

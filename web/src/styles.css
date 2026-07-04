@@ -148,6 +148,10 @@ input, textarea, select { font-family: inherit; color: var(--text); }
 .pill.live { background: var(--green-soft); color: var(--green); border-color: rgba(52,211,153,.25); }
 .pill.mock { background: var(--amber-soft); color: var(--amber); border-color: rgba(251,191,36,.25); }
 .pill.accent { background: var(--accent-soft); color: var(--accent-strong); border-color: rgba(139,92,246,.3); }
+/* trend lifecycle stages */
+.pill.stage-new { background: var(--green-soft); color: var(--green); border-color: rgba(52,211,153,.25); }
+.pill.stage-rising { background: var(--blue-soft); color: var(--blue); border-color: rgba(96,165,250,.25); }
+.pill.stage-declining { background: var(--red-soft); color: var(--red); border-color: rgba(248,113,113,.25); }
 
 .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
 .dot.green { background: var(--green); box-shadow: 0 0 6px rgba(52,211,153,.6); }

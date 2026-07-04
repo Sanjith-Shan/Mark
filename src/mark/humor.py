@@ -165,12 +165,17 @@ def _scaffold_complete(c: JokeCandidate) -> bool:
 
 def _rank(app, llm, product, platform, candidates,
           content_id=None, product_id=None):
-    """Winner-stays pairwise tournament. N-1 cheap judge calls."""
+    """Winner-stays pairwise tournament. N-1 cheap judge calls. The judge is
+    calibrated with real preference pairs mined from this account's own
+    engagement history (the documented expert-level-ranking lever)."""
+    from .learning import calibration
+
+    calib = calibration.calibration_block(app, product["id"], platform)
     champion = candidates[0]
     verdict: Optional[PairwiseVerdict] = None
     for challenger in candidates[1:]:
         v = llm.parse(
-            prompts.pairwise_judge_system(product, platform),
+            prompts.pairwise_judge_system(product, platform, calibration=calib),
             prompts.pairwise_judge_user(champion, challenger),
             PairwiseVerdict,
             model=app.settings.llm.judge_model, temperature=0.2,
@@ -184,7 +189,7 @@ def _rank(app, llm, product, platform, candidates,
         verdict = v
     if verdict is None:  # single candidate — judge it against itself for the gate scores
         verdict = llm.parse(
-            prompts.pairwise_judge_system(product, platform),
+            prompts.pairwise_judge_system(product, platform, calibration=calib),
             prompts.pairwise_judge_user(champion, champion),
             PairwiseVerdict,
             model=app.settings.llm.judge_model, temperature=0.2,

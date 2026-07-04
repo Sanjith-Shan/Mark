@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { useGlobal } from "../store";
 import { ALL_PLATFORMS, Content, MediaItem, PLATFORM_COLORS, PLATFORM_LABELS, PostRecord } from "../types";
-import { Empty, Modal, Pill, PlatformChip, Spinner, StatusPill, fmt, pct, timeAgo } from "../components/ui";
+import { Empty, Modal, Pill, PlatformChip, Spinner, StatusPill, fmt, parseUtc, pct, timeAgo } from "../components/ui";
 
 const STATUSES = ["draft", "approved", "posted", "failed", "rejected"] as const;
 type Status = (typeof STATUSES)[number];
@@ -110,6 +110,7 @@ function QueueCard(props: {
 }) {
   const c = props.content;
   const media = c.media?.[0];
+  const ctx = c.strategy_context;
   return (
     <div className="content-card" onClick={props.onOpen}>
       <div className="content-thumb">
@@ -122,6 +123,19 @@ function QueueCard(props: {
       <div className="content-body">
         {c.hook && <div className="content-hook">{c.hook}</div>}
         {c.caption && <div className="content-caption">{c.caption}</div>}
+        {(ctx?.strategy_name || ctx?.character || ctx?.forced_trend || ctx?.emotional_target || c.expires_at) && (
+          <div className="row wrap" style={{ gap: 5 }}>
+            {ctx?.strategy_name && (
+              <Pill kind="accent">{ctx.strategy_name}{ctx.episode ? ` · ep ${ctx.episode}` : ""}</Pill>
+            )}
+            {ctx?.emotional_target && <Pill>{ctx.emotional_target.replace(/_/g, " ")}</Pill>}
+            {ctx?.character && <Pill>🎭 {ctx.character}</Pill>}
+            {ctx?.forced_trend && (
+              <Pill><span title={`trend ride: ${ctx.forced_trend}`}>🏄 trend ride</span></Pill>
+            )}
+            <ExpiryChip expiresAt={c.expires_at} />
+          </div>
+        )}
         <div className="content-foot">
           <PlatformChip platform={c.platform} />
           <div className="row" style={{ gap: 6 }}>
@@ -153,6 +167,22 @@ function Thumb({ media, platform, contentType }: { media?: MediaItem; platform: 
       <span style={{ fontSize: 34, opacity: 0.8 }}>{TYPE_GLYPHS[contentType] ?? "📝"}</span>
     </div>
   );
+}
+
+/** Trend-content TTL chip: countdown while the window is open, "expired" after. */
+function ExpiryChip({ expiresAt }: { expiresAt?: string | null }) {
+  if (!expiresAt) return null;
+  const ms = parseUtc(expiresAt).getTime() - Date.now();
+  if (ms <= 0) return <Pill kind="failed">trend window expired</Pill>;
+  return <Pill kind="draft">⏳ trend window closes in {durationShort(ms)}</Pill>;
+}
+
+function durationShort(ms: number): string {
+  const mins = Math.ceil(ms / 60_000);
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.round(ms / 3_600_000);
+  if (hours < 48) return `${hours}h`;
+  return `${Math.round(hours / 24)}d`;
 }
 
 /* ---------- detail drawer ---------- */
@@ -312,6 +342,7 @@ function Drawer(props: { id: number; initialReject: boolean; onClose: () => void
                 <StatusPill status={detail.status} />
                 <PlatformChip platform={detail.platform} />
                 <Pill>{detail.content_type}</Pill>
+                <ExpiryChip expiresAt={detail.expires_at} />
                 <span className="faint small">#{detail.id} · {timeAgo(detail.created_at)}</span>
               </div>
               <button className="btn ghost sm" onClick={props.onClose}>✕</button>
@@ -345,13 +376,28 @@ function Drawer(props: { id: number; initialReject: boolean; onClose: () => void
             ) : null}
 
             {/* why this content */}
-            {ctx && (ctx.topic || ctx.reasoning) && (
+            {ctx && (ctx.topic || ctx.reasoning || ctx.strategy_name) && (
               <div style={{
                 background: "var(--bg-card)", border: "1px solid var(--border)",
                 borderRadius: "var(--radius-sm)", padding: "10px 12px",
               }}>
                 <div className="field-label" style={{ marginBottom: 6 }}>Why this content</div>
                 <div className="small muted stack" style={{ gap: 3 }}>
+                  {ctx.strategy_name && (
+                    <div>
+                      <span className="faint">strategy</span> — {ctx.strategy_name}
+                      {ctx.episode ? ` · episode ${ctx.episode}` : ""}
+                    </div>
+                  )}
+                  {ctx.emotional_target && <div><span className="faint">emotional target</span> — {ctx.emotional_target.replace(/_/g, " ")}</div>}
+                  {ctx.humor_mechanism && (
+                    <div>
+                      <span className="faint">humor</span> — {ctx.humor_mechanism}
+                      {ctx.humor_persona ? ` · as ${ctx.humor_persona}` : ""}
+                    </div>
+                  )}
+                  {ctx.character && <div><span className="faint">character</span> — 🎭 {ctx.character}</div>}
+                  {ctx.forced_trend && <div><span className="faint">trend ride</span> — {ctx.forced_trend}</div>}
                   {ctx.topic && <div><span className="faint">topic</span> — {ctx.topic}</div>}
                   {ctx.angle && <div><span className="faint">angle</span> — {ctx.angle}</div>}
                   {ctx.hook_style && <div><span className="faint">hook style</span> — {ctx.hook_style}</div>}

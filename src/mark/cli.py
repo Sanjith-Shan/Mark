@@ -334,11 +334,140 @@ def trends(
     table.add_column("source")
     table.add_column("topic")
     table.add_column("score", justify="right")
+    table.add_column("stage")
     table.add_column("relevance", justify="right")
+    stage_style = {"new": "green", "rising": "cyan", "mature": "dim", "declining": "red"}
     for r in rows:
-        rel = (r.get("metadata") or {}).get("relevance", "")
-        table.add_row(r["source"], r["topic"], f"{r['trend_score']:.3f}", str(rel))
+        meta = r.get("metadata") or {}
+        rel = meta.get("relevance", "")
+        stage = r.get("stage") or "?"
+        notes = []
+        if meta.get("safe") is False:
+            notes.append("⚠ origin")
+        if meta.get("sound_dependent"):
+            notes.append("♫ manual")
+        stage_s = f"[{stage_style.get(stage, 'white')}]{stage}[/]" + \
+            ((" " + " ".join(notes)) if notes else "")
+        table.add_row(r["source"], r["topic"], f"{r['trend_score']:.3f}", stage_s, str(rel))
     console.print(table)
+
+
+@app.command()
+def react(
+    ctx: typer.Context,
+    topic: Optional[str] = typer.Option(None, "--topic", "-t",
+                                        help="Trend topic (default: hottest qualifying)."),
+    product: Optional[str] = typer.Option(None, "--product", "-p"),
+    platform: Optional[list[str]] = typer.Option(None, "--platform"),
+):
+    """Ride a hot trend NOW — generate trend content without waiting for the cron."""
+    from .llm import LLM
+    from .trends import aggregator
+
+    a = _app(ctx)
+    prod = _resolve_product_or_exit(a, product)
+    trend = None
+    if topic:
+        for t in aggregator.recent_trends(a, limit=100, max_age_hours=48):
+            if t["topic"].strip().lower() == topic.strip().lower():
+                trend = t
+                break
+        if trend is None:
+            console.print(f"[red]Trend “{topic}” not found in recent trends.[/]")
+            raise typer.Exit(1)
+    with console.status("[bold]Riding the trend…[/]"):
+        rows = aggregator.react(a, LLM(a), prod, trend=trend,
+                                platforms=list(platform) if platform else None)
+    if not rows:
+        console.print("[yellow]Nothing drafted[/] — no qualifying hot trend, or the "
+                      "daily reaction cap is reached.")
+        raise typer.Exit()
+    for row in rows:
+        console.print(f"[green]Drafted[/] #{row['id']} [{row['platform']}] — {row['hook']}")
+
+
+@app.command()
+def strategies(
+    ctx: typer.Context,
+    product: Optional[str] = typer.Option(None, "--product", "-p"),
+    platform: Optional[str] = typer.Option(None, "--platform"),
+):
+    """Show the strategy catalog (and which strategies fit where)."""
+    from . import strategies as strategies_mod
+
+    a = _app(ctx)
+    prod = store.resolve_product(a.conn, product)
+    table = Table(title="Strategy catalog")
+    for col in ("id", "emotion", "humor", "weight", "platforms"):
+        table.add_column(col)
+    pool = strategies_mod.STRATEGIES
+    if prod and platform:
+        pool = strategies_mod.eligible(a, prod, platform)
+    allow = strategies_mod.product_allowlist(prod) if prod else None
+    for s in pool:
+        marker = "" if (allow is None or s.id in allow) else " [dim](off)[/]"
+        table.add_row(s.id + marker, s.emotional_target, s.humor_level,
+                      f"{s.mix_weight:.2f}", ", ".join(sorted(s.platforms)))
+    console.print(table)
+
+
+character_app = typer.Typer(help="Manage AI ambassador characters.")
+app.add_typer(character_app, name="character")
+
+
+@character_app.command("list")
+def character_list(ctx: typer.Context,
+                   product: Optional[str] = typer.Option(None, "--product", "-p")):
+    """List characters for a product."""
+    from . import characters as characters_mod
+
+    a = _app(ctx)
+    prod = _resolve_product_or_exit(a, product)
+    rows = characters_mod.list_for_product(a, prod["id"], include_inactive=True)
+    if not rows:
+        console.print("[yellow]No characters.[/] Add YAML bibles under "
+                      "config/characters/ and run [bold]mark character sync[/].")
+        raise typer.Exit()
+    table = Table(title=f"Characters — {prod['name']}")
+    for col in ("id", "name", "role", "active", "sheet", "lore"):
+        table.add_column(col)
+    for c in rows:
+        lore = c.get("lore_state") or {}
+        lore_s = ", ".join(f"{k}={v}" for k, v in lore.items()
+                           if isinstance(v, (int, float)))[:60]
+        table.add_row(str(c["id"]), c["name"], c.get("role") or "",
+                      "yes" if c["active"] else "no",
+                      "✓" if c.get("reference_image") else "—", lore_s)
+    console.print(table)
+
+
+@character_app.command("sync")
+def character_sync(ctx: typer.Context):
+    """Sync character bibles from config/characters/*.yaml into the database."""
+    from . import characters as characters_mod
+
+    a = _app(ctx)
+    synced = characters_mod.sync_from_config(a)
+    console.print(f"[green]Synced {len(synced)} character(s).[/]")
+
+
+@character_app.command("sheet")
+def character_sheet(ctx: typer.Context, character_id: int):
+    """Generate (or regenerate) a character's reference sheet image."""
+    from . import characters as characters_mod
+    from .llm import LLM
+
+    a = _app(ctx)
+    c = characters_mod.get(a, character_id)
+    if not c:
+        console.print(f"[red]Character {character_id} not found.[/]")
+        raise typer.Exit(1)
+    with console.status(f"[bold]Rendering {c['name']}'s reference sheet…[/]"):
+        from . import db as db_module
+
+        db_module.update(a.conn, "characters", character_id, reference_image=None)
+        path = characters_mod.ensure_reference_image(a, LLM(a), characters_mod.get(a, character_id))
+    console.print(f"[green]Sheet saved:[/] {path}")
 
 
 @app.command()

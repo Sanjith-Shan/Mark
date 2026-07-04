@@ -5,6 +5,7 @@ import Campaigns from "./pages/Campaigns";
 import Studio from "./pages/Studio";
 import Analytics from "./pages/Analytics";
 import Trends from "./pages/Trends";
+import Playbook from "./pages/Playbook";
 import Learn from "./pages/Learn";
 import Autopilot from "./pages/Autopilot";
 import Settings from "./pages/Settings";
@@ -28,6 +29,7 @@ const I = {
   brain: icon('<path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M12 5v13"/>'),
   bolt: icon('<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>'),
   gear: icon('<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>'),
+  book: icon('<path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/>'),
 };
 
 const NAV = [
@@ -36,6 +38,7 @@ const NAV = [
   { to: "/studio", label: "Studio", icon: I.sparkles },
   { to: "/analytics", label: "Analytics", icon: I.chart },
   { to: "/trends", label: "Trends", icon: I.fire },
+  { to: "/playbook", label: "Playbook", icon: I.book },
   { to: "/learn", label: "Learn", icon: I.brain },
   { to: "/autopilot", label: "Autopilot", icon: I.bolt },
   { to: "/settings", label: "Settings", icon: I.gear },
@@ -43,7 +46,8 @@ const NAV = [
 
 const TITLES: Record<string, string> = {
   "/": "Dashboard", "/campaigns": "Campaigns", "/studio": "Content Studio",
-  "/analytics": "Analytics", "/trends": "Trends", "/learn": "What's working",
+  "/analytics": "Analytics", "/trends": "Trends", "/playbook": "Playbook",
+  "/learn": "What's working",
   "/autopilot": "Autopilot", "/settings": "Settings",
 };
 
@@ -101,6 +105,7 @@ function Shell() {
               <Route path="/studio" element={<Studio />} />
               <Route path="/analytics" element={<Analytics />} />
               <Route path="/trends" element={<Trends />} />
+              <Route path="/playbook" element={<Playbook />} />
               <Route path="/learn" element={<Learn />} />
               <Route path="/autopilot" element={<Autopilot />} />
               <Route path="/settings" element={<Settings />} />
