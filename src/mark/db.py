@@ -154,6 +154,21 @@ CREATE TABLE IF NOT EXISTS activity (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Persistent AI characters (brand ambassadors / mascots) fronting content.
+CREATE TABLE IF NOT EXISTS characters (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id TEXT NOT NULL REFERENCES products(id),
+    name TEXT NOT NULL,
+    role TEXT DEFAULT 'ambassador',    -- "ambassador", "mascot", "parody"
+    persona TEXT NOT NULL,             -- lore + personality + how they talk
+    visual_desc TEXT NOT NULL,         -- canonical appearance, prepended to media prompts
+    voice TEXT,                        -- TTS voice id (falls back to global config)
+    catchphrases TEXT,                 -- JSON array
+    reference_image TEXT,              -- canonical character-sheet PNG path
+    active INTEGER DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX IF NOT EXISTS idx_content_status ON content(status);
 CREATE INDEX IF NOT EXISTS idx_content_product ON content(product_id);
 CREATE INDEX IF NOT EXISTS idx_metrics_post ON metrics(post_id);
@@ -192,6 +207,9 @@ MIGRATIONS: list[tuple[str, str, str]] = [
     ("comments", "platform", "TEXT"),
     ("comments", "collected_at", "TIMESTAMP"),
     ("trends", "style_notes", "TEXT"),         # LLM analysis of the trend's format/style/audio
+    ("products", "strategies", "TEXT"),        # JSON allowlist of strategy ids (null = all)
+    ("trends", "velocity", "REAL"),            # score delta vs previous sighting (None = first sighting)
+    ("products", "specificity_bank", "TEXT"),  # JSON: concrete audience-life artifacts fueling humor
 ]
 
 

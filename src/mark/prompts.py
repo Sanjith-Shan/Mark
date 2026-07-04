@@ -124,12 +124,69 @@ def format_bandit(picks: dict) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# Strategy blocks (from the strategy framework — strategies.py)
+# --------------------------------------------------------------------------- #
+def strategy_block(strategy, platform: str, episode: int = 1) -> str:
+    """The shared strategy header injected into both strategist and writer."""
+    if strategy is None:
+        return ""
+    note = strategy.platform_note(platform)
+    lines = [
+        f"\nACTIVE STRATEGY: {strategy.name} ({strategy.id})",
+        f"WHY IT WORKS: {strategy.description}",
+        f"EMOTIONAL TARGET: make the viewer feel {strategy.emotional_target}.",
+    ]
+    if note:
+        lines.append(f"ON {platform.upper()}: {note}")
+    if strategy.series_format:
+        lines.append(f"THIS IS A SERIES — episode {episode}. Format: {strategy.series_format}")
+    return "\n".join(lines)
+
+
+def strategy_examples_block(strategy) -> str:
+    if not strategy or not strategy.example_sketches:
+        return ""
+    ex = "\n".join(f"- {s}" for s in strategy.example_sketches[:3])
+    return f"\nWHAT GREAT OUTPUT UNDER THIS STRATEGY LOOKS LIKE (flavor, don't copy):\n{ex}"
+
+
+def character_block(character: Optional[dict]) -> str:
+    """Injected into the writer when a persistent character fronts the content."""
+    if not character:
+        return ""
+    phrases = character.get("catchphrases") or []
+    phrase_line = ("\nCATCHPHRASES (use sparingly, max one per post): "
+                   + "; ".join(f'"{p}"' for p in phrases[:5])) if phrases else ""
+    return f"""
+THIS CONTENT IS FRONTED BY A PERSISTENT CHARACTER — write AS them, not about them.
+CHARACTER: {character['name']} ({character.get('role') or 'ambassador'})
+PERSONA: {character['persona']}
+APPEARANCE (for media prompts): {character['visual_desc']}{phrase_line}
+Stay ruthlessly in character. The character's voice OVERRIDES the default brand
+voice where they conflict. Never break the fourth wall about being AI unless the
+persona explicitly plays with that."""
+
+
+# --------------------------------------------------------------------------- #
 # Strategist
 # --------------------------------------------------------------------------- #
 def strategist_system(product: dict, platform: str, trends: list[dict],
                       winners: list[dict], bandit_picks: dict,
-                      allowed_types: list[str]) -> str:
+                      allowed_types: list[str], strategy=None, episode: int = 1,
+                      forced_trend: Optional[dict] = None) -> str:
+    strat = strategy_block(strategy, platform, episode)
+    strat_brief = f"\nSTRATEGY BRIEF: {strategy.strategist_brief}" if strategy and strategy.strategist_brief else ""
+    forced = ""
+    if forced_trend:
+        style = (forced_trend.get("style_notes") or "").strip()
+        forced = (f"\nNON-NEGOTIABLE: this content MUST ride the trend "
+                  f"“{forced_trend.get('topic')}” — it is spiking right now and speed "
+                  "matters more than polish. Tie it to the product authentically; if the "
+                  "product angle would ruin the joke, let the trend carry and keep the "
+                  "product to the caption."
+                  + (f"\nHOW CREATORS ARE EXECUTING IT: {style}" if style else ""))
     return f"""You are a world-class social media strategist for {product['name']}.
+{strat}{strat_brief}{forced}
 
 PRODUCT: {product['description']}
 TARGET AUDIENCE: {product['target_audience']}
@@ -166,9 +223,16 @@ def strategist_user(platform: str) -> str:
 # --------------------------------------------------------------------------- #
 # Writer
 # --------------------------------------------------------------------------- #
-def writer_system(product: dict, platform: str, plan, winner_examples: list[dict]) -> str:
+def writer_system(product: dict, platform: str, plan, winner_examples: list[dict],
+                  strategy=None, episode: int = 1, character: Optional[dict] = None) -> str:
     trend = plan.trend_tie_in or "none"
+    strat = strategy_block(strategy, platform, episode)
+    strat_brief = f"\nSTRATEGY BRIEF: {strategy.writer_brief}" if strategy and strategy.writer_brief else ""
+    media_brief = f"\nMEDIA STYLE: {strategy.media_brief}" if strategy and strategy.media_brief else ""
+    examples = strategy_examples_block(strategy)
+    char = character_block(character)
     return f"""You are an elite copywriter creating a {plan.content_type} for {platform}.
+{strat}{strat_brief}{media_brief}{examples}{char}
 
 PRODUCT: {product['name']} — {product['description']}
 BRAND VOICE: {product['brand_voice']}
@@ -221,8 +285,167 @@ def writer_novelty_nudge(similar_caption: str) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# Judge (variant selection)
+# Humor engine (humor.py) — grounded in docs/research/humor-mechanics.md
 # --------------------------------------------------------------------------- #
+# Hedges and humor-slop that kill jokes: never explain, never soften.
+HUMOR_BANNED = [
+    "just kidding", "we've all been there", "am i right", "amirite",
+    "because let's face it", "if you know you know", "lol right",
+    "wacky", "zany", "hilarious", "😂😂", "who can relate",
+]
+
+HUMOR_RULES = (
+    "IRON RULES OF THE JOKE:\n"
+    "1. NEVER explain the joke. The piece ENDS on the punch — no sentence after the "
+    "punch word, no restating the premise, no trailing emoji laughing at itself.\n"
+    "2. The punch word goes LAST. Put a beat (line break) before the final line.\n"
+    "3. Punch UP or SIDEWAYS only: at institutions, processes, the absurd system, or "
+    "the brand itself. Never at the audience or any vulnerable group.\n"
+    "4. Be hyper-specific. Concrete, lived details ('the Workday account you made for "
+    "one application in 2023') beat categories ('job applications are annoying'). "
+    "At least one hyper-specific detail per piece.\n"
+    "5. Surprise is non-negotiable — if the reader can guess the ending, it is dead.\n"
+    "6. Banned humor-slop: " + "; ".join(f'"{p}"' for p in HUMOR_BANNED) + "."
+)
+
+PERSONA_VOICES = {
+    "cynic": "dry, seen-it-all, dark around the edges; finds the bleak detail and states it plainly",
+    "absurdist": "commits to complete nonsense with a perfectly straight face; internally consistent lunacy",
+    "deadpan_observer": "flat, factual delivery of devastatingly specific observations; zero exclamation points",
+    "neurotic_student": "first-person spiraling anxiety played for laughs; escalating inner monologue",
+    "corporate_parodist": "speaks fluent recruiter/HR-ese and weaponizes it; the language itself is the joke",
+    "unhinged_ai": "openly a machine and makes THAT the bit; cheerful menace; treats being an unsupervised marketing script as normal",
+}
+
+MECHANISM_RECIPES = {
+    "setup_subversion": (
+        "SETUP-SUBVERSION: the setup builds a false 1st story via a connector (one element "
+        "with two readings); the punchline reveals the 2nd reading and shatters the target "
+        "assumption. You must be able to name: target_assumption, connector, reinterpretation, "
+        "punch_word. Reveal goes last."),
+    "rule_of_three": (
+        "RULE OF THREE: items 1 and 2 establish a clean pattern (parallel, similar length); "
+        "item 3 is slightly longer and carries the violation. Item 3 must be the funny one."),
+    "escalation": (
+        "ESCALATION: one 'first unusual thing' stated in the first beat, then 3-5 heightens, "
+        "each answering 'if that's true, what else is true?' — premise-consistent and bigger "
+        "each time. End at the peak, or loop back to the opening."),
+    "anti_humor": (
+        "ANTI-HUMOR: play a saturated format perfectly straight and land a flat, literal, "
+        "abrupt payoff where the punchline should be. The missing joke IS the joke. Deadpan "
+        "throughout; do not wink."),
+    "absurdist_lore": (
+        "ABSURDIST LORE: self-aware AI absurdism. Rigid template, escalating lore, entities "
+        "with repetitive/rhythmic names. Obvious artificiality is the aesthetic — acknowledge "
+        "machine identity as part of the bit. Never explain the lore."),
+    "observational_specific": (
+        "OBSERVATIONAL SPECIFICITY: name the hyper-specific shared experience the audience "
+        "thought only they had, and say the quiet part too honestly. The specificity does the "
+        "comedic work — no twist needed, just recognition sharp enough to sting."),
+    "callback": (
+        "CALLBACK: bring back an earlier bit/character/phrase from this account's history in "
+        "a new context. Reward followers for paying attention. NEVER explain the reference."),
+}
+
+
+def violation_search_system(product: dict, platform: str, specificity_bank: list[str]) -> str:
+    bank = "\n".join(f"- {s}" for s in specificity_bank[:8]) if specificity_bank else "(none yet)"
+    return f"""You are a comedy writer mining for material for {product['name']} on {platform}.
+
+AUDIENCE: {product['target_audience']}
+
+THE THEORY (benign violation): a laugh needs something simultaneously WRONG (violates
+how the world ought to be) and SAFE (harmless for this audience). Too safe = boring.
+Too wrong = offensive. Funny lives on the ridge between.
+
+RAW MATERIAL — real artifacts of this audience's life (use these, add your own):
+{bank}
+
+List candidate violations about the given topic: things that are wrong, absurd, or
+secretly-true-but-never-said — each safe for this audience because it punches at the
+system/process/institutions (or the brand itself), never at the audience.
+Score each: strength (how strongly it violates expectations, 0-1) and benignness
+(how safe it is, 0-1). Name the target of each. Discard nothing — list them all,
+weak ones included; ranking happens later."""
+
+
+def violation_search_user(topic: str, angle: str) -> str:
+    return (f"Topic: {topic}\nAngle: {angle}\n\n"
+            "List 8-12 candidate violations with strength, benignness, and target.")
+
+
+def humor_fanout_system(product: dict, platform: str, plan, violation,
+                        personas: list[str], mechanism: str,
+                        specificity_bank: list[str], character: Optional[dict] = None) -> str:
+    persona_lines = "\n".join(f"- {p}: {PERSONA_VOICES.get(p, p)}" for p in personas)
+    recipe = MECHANISM_RECIPES.get(mechanism, "")
+    bank = "\n".join(f"- {s}" for s in specificity_bank[:6]) if specificity_bank else "(none)"
+    char = character_block(character)
+    return f"""You are a punch-up room writing {plan.content_type} comedy for {product['name']} on {platform}.
+{char}
+THE VIOLATION TO BUILD ON (this is the joke's engine):
+"{violation.violation}" (punches at: {violation.target})
+
+STRUCTURE TO USE:
+{recipe}
+
+WRITE ONE CANDIDATE PER PERSONA — each persona forces a different direction:
+{persona_lines}
+
+SPECIFICITY BANK (weave in real artifacts of the audience's life):
+{bank}
+
+{HUMOR_RULES}
+
+For each candidate fill the full scaffold: persona, mechanism ("{mechanism}"),
+hook (the scroll-stopping opening — it doubles as the setup), caption, script (only
+if this is a video — exactly what is spoken, the punch beat on its own line),
+target_assumption, connector, reinterpretation, punch_word.
+If you cannot name all four scaffold fields for a candidate, that candidate is not
+a joke yet — rework it until you can."""
+
+
+def humor_fanout_user(plan, draft) -> str:
+    base = f"Topic: {plan.topic}\nAngle: {plan.angle}\n"
+    base += f"Current (unfunny) draft to transform:\nHOOK: {draft.hook}\nCAPTION: {draft.caption}"
+    if draft.script:
+        base += f"\nSCRIPT: {draft.script}"
+    return base + "\n\nWrite the candidates now — one per persona."
+
+
+def pairwise_judge_system(product: dict, platform: str) -> str:
+    return f"""You judge which of two comedy drafts is FUNNIER for {product['name']} on {platform}.
+Audience: {product['target_audience']}
+
+Compare PAIRWISE (never absolute scores). The funnier draft is the one with:
+- a genuine violation (something actually wrong/absurd, not humor-shaped blandness)
+- an unguessable punchline (if you saw the twist coming, it loses)
+- the audience doing the final step (nothing explained after the punch)
+- hyper-specific details over categories
+- a clear target assumption that gets shattered
+
+Instantly penalize: explanation after the punch, hedging, "wacky" adjectives doing
+the humor's work, punching down, generic references, recycled/well-known jokes.
+
+Also score the WINNER: violation_strength 0-1 (0 = bland corporate safety),
+benignness 0-1 (0 = punches wrong / off-brand offense), and guessable (true if the
+punchline is predictable from the setup)."""
+
+
+def pairwise_judge_user(a, b) -> str:
+    def fmt(c, i):
+        s = f"[{i}] ({c.persona}/{c.mechanism})\nHOOK: {c.hook}\nCAPTION: {c.caption}"
+        if c.script:
+            s += f"\nSCRIPT: {c.script}"
+        return s
+    return f"{fmt(a, 0)}\n\n{fmt(b, 1)}\n\nWhich is funnier? Return winner (0 or 1) and the winner's scores."
+
+
+def guess_check_system() -> str:
+    return ("You are given the SETUP of a joke (everything before the final line). "
+            "Predict how it ends: write 3 different plausible final lines. Just predict "
+            "the most likely endings — do not try to be funny.")
+
 def judge_system(product: dict, platform: str) -> str:
     return f"""You are a ruthless creative director judging draft social posts for
 {product['name']} on {platform}. Brand voice: {product['brand_voice']}.

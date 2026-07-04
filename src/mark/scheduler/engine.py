@@ -95,7 +95,31 @@ def job_trends(app: App, llm: LLM) -> None:
 
     for product in _active_products(app):
         _safe(aggregator.refresh, app, llm, product)
+        # Fast path: if a hot trend just appeared and auto_react is on, draft
+        # trend-riding content immediately instead of waiting for tomorrow's cron.
+        if app.settings.trends.auto_react:
+            _safe(aggregator.react, app, llm, product)
     log.info("refreshed trends")
+
+
+def job_post_scheduled(app: App) -> None:
+    """Post approved content whose explicit `scheduled_at` time has arrived.
+    User-scheduled items bypass optimal-time slots but still respect daily caps."""
+    from ..posting import manager
+
+    rows = db_module.query(
+        app.conn,
+        "SELECT c.* FROM content c JOIN products pr ON pr.id = c.product_id "
+        "WHERE c.status = 'approved' AND c.scheduled_at IS NOT NULL "
+        "AND c.scheduled_at <= datetime('now') "
+        "AND pr.active = 1 AND COALESCE(pr.archived, 0) = 0 "
+        "ORDER BY c.scheduled_at ASC")
+    for row in rows:
+        platform = row["platform"]
+        if _posts_today(app, platform) >= app.settings.platform(platform).max_posts_per_day:
+            continue
+        _safe(manager.post_content, app, dict(row))
+        log.info("posted scheduled content %s to %s", row["id"], platform)
 
 
 def job_feedback(app: App, llm: LLM) -> None:
@@ -174,6 +198,13 @@ def build_scheduler(app: App, llm: LLM, *, blocking: bool = True,
     sched.add_job(_job(job_feedback, needs_llm=True),
                   CronTrigger.from_crontab(sc.feedback_loop_cron, timezone=tz),
                   id="feedback", name="feedback loop")
+
+    # User-scheduled posts: check every 5 minutes so `scheduled_at` is honored
+    # within a few minutes of the chosen time.
+    from apscheduler.triggers.interval import IntervalTrigger
+
+    sched.add_job(_job(job_post_scheduled), IntervalTrigger(minutes=5, timezone=tz),
+                  id="post-scheduled", name="post user-scheduled content")
 
     # One posting job per (platform, optimal_time), with ± jitter to avoid bot
     # patterns and to spread posts out.

@@ -55,26 +55,56 @@ def generate_image(
     *,
     size: str = "1024x1024",
     quality: Optional[str] = None,
+    reference_images: Optional[list[Path]] = None,
     content_id: Optional[int] = None,
     product_id: Optional[str] = None,
 ) -> Path:
-    """Generate one image to ``out_path`` and return the path."""
+    """Generate one image to ``out_path`` and return the path.
+
+    ``reference_images`` switches to reference-conditioned generation
+    (images.edit) so a persistent character keeps the same face/outfit across
+    every asset. Falls back to plain generation if the edit call fails.
+    """
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     quality = quality or app.settings.media.image_quality
+    refs = [Path(r) for r in (reference_images or []) if Path(r).exists()]
 
     if app.is_mock("openai"):
-        img = _mock_image(prompt, _parse_size(size))
+        mock_key = prompt + "".join(r.name for r in refs)
+        img = _mock_image(mock_key, _parse_size(size))
         img.save(out_path)
         log_external_cost(app, "openai", "image", quality, units=1,
                           content_id=content_id, product_id=product_id, mocked=True)
         return out_path
 
     client = llm.client()
-    resp = client.images.generate(
-        model=app.settings.media.image_model, prompt=prompt,
-        size=size, quality=quality, n=1,
-    )
+    resp = None
+    if refs:
+        try:
+            handles = [open(r, "rb") for r in refs]
+            try:
+                resp = client.images.edit(
+                    model=app.settings.media.image_model,
+                    image=handles if len(handles) > 1 else handles[0],
+                    prompt=prompt, size=size, quality=quality,
+                    input_fidelity="high",  # preserve faces/identity from the reference
+                    n=1,
+                )
+            finally:
+                for h in handles:
+                    h.close()
+        except Exception:
+            import logging
+
+            logging.getLogger("mark.images").warning(
+                "reference-conditioned edit failed; falling back to plain generation")
+            resp = None
+    if resp is None:
+        resp = client.images.generate(
+            model=app.settings.media.image_model, prompt=prompt,
+            size=size, quality=quality, n=1,
+        )
     datum = resp.data[0]
     if getattr(datum, "b64_json", None):
         out_path.write_bytes(base64.b64decode(datum.b64_json))

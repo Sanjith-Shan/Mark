@@ -21,17 +21,22 @@ def upsert_product(conn: sqlite3.Connection, p: ProductConfig, active: bool = Tr
         conn,
         """
         INSERT INTO products (id, name, description, target_audience, brand_voice,
-                              website_url, platforms, posting_cadence, active)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                              website_url, platforms, posting_cadence, strategies,
+                              specificity_bank, active)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             name=excluded.name, description=excluded.description,
             target_audience=excluded.target_audience, brand_voice=excluded.brand_voice,
             website_url=excluded.website_url, platforms=excluded.platforms,
-            posting_cadence=excluded.posting_cadence
+            posting_cadence=excluded.posting_cadence, strategies=excluded.strategies,
+            specificity_bank=excluded.specificity_bank
         """,
         (p.id, p.name, p.description, p.target_audience, p.brand_voice,
          p.website_url, db_module._encode(p.platforms),
-         db_module._encode(p.posting_cadence), 1 if active else 0),
+         db_module._encode(p.posting_cadence),
+         db_module._encode(p.strategies) if p.strategies else None,
+         db_module._encode(p.specificity_bank) if p.specificity_bank else None,
+         1 if active else 0),
     )
     if active:
         set_active_product(conn, p.id)

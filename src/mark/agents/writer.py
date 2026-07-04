@@ -33,9 +33,14 @@ def write_content(
     novelty_similar: Optional[str] = None,
     user_feedback: Optional[list[str]] = None,
     content_id: Optional[int] = None,
+    strategy=None,
+    episode: int = 1,
+    character: Optional[dict] = None,
+    bandit_picks: Optional[dict] = None,
 ) -> ContentDraft:
     winner_examples = winner_examples or []
-    system = prompts.writer_system(product, platform, plan, winner_examples)
+    system = prompts.writer_system(product, platform, plan, winner_examples,
+                                   strategy=strategy, episode=episode, character=character)
     user = prompts.writer_user(plan)
     if user_feedback:
         user += prompts.writer_feedback_section(user_feedback)
@@ -58,6 +63,18 @@ def write_content(
 
     if app.settings.llm.self_critique:
         draft = _critique(app, llm, product, platform, draft, content_id)
+
+    # Humor engine: strategies opt in via humor_level; a bare "funny" tone from
+    # the strategist gets the light pass so tone-funny content is actually funny.
+    humor_level = getattr(strategy, "humor_level", "none") if strategy else "none"
+    if humor_level == "none" and plan.tone == "funny":
+        humor_level = "light"
+    if humor_level != "none":
+        from .. import humor
+
+        draft = humor.punch_up(app, llm, product, platform, plan, draft,
+                               level=humor_level, bandit_picks=bandit_picks,
+                               character=character, content_id=content_id)
 
     return _finalize(draft, app, platform, plan)
 

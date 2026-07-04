@@ -39,6 +39,8 @@ class ContentDraft(BaseModel):
     image_prompts: Optional[list[str]] = None  # carousel: prompt per slide
     video_prompt: Optional[str] = None
     video_style: Optional[str] = None        # "talking_head", "b_roll", "text_overlay", "ai_generated"
+    humor_mechanism: Optional[str] = None    # set by the humor engine (bandit-tracked)
+    humor_persona: Optional[str] = None      # set by the humor engine (bandit-tracked)
 
 
 class JudgeVerdict(BaseModel):
@@ -122,6 +124,57 @@ class EngagementInsightsWire(BaseModel):
             recommended_adjustments=ins.recommended_adjustments,
             raw_analysis=ins.raw_analysis,
         )
+
+
+# --------------------------------------------------------------------------- #
+# Humor engine (humor.py) — violation search → scaffold fan-out → pairwise rank
+# --------------------------------------------------------------------------- #
+class Violation(BaseModel):
+    """One candidate 'benign violation' — the raw material of a joke."""
+
+    violation: str            # what's wrong/absurd/secretly-true, stated plainly
+    strength: float = 0.0     # 0..1 — how strongly it violates expectations
+    benignness: float = 0.0   # 0..1 — how safe/harmless it is for this audience
+    target: str = ""          # who/what the joke punches at (must be up/sideways)
+
+
+class ViolationSearch(BaseModel):
+    items: list[Violation] = Field(default_factory=list)
+
+
+class JokeCandidate(BaseModel):
+    """One scaffolded comedic rewrite of a draft."""
+
+    persona: str = ""             # which comedic persona wrote it
+    mechanism: str = ""           # which joke structure it uses
+    hook: str = ""
+    caption: str = ""
+    script: Optional[str] = None  # rewritten spoken script (video only)
+    target_assumption: str = ""   # what the setup makes the reader believe
+    connector: str = ""           # the ambiguous element with two readings
+    reinterpretation: str = ""    # the second reading the punchline reveals
+    punch_word: str = ""          # the reveal — must appear at/near the very end
+
+
+class JokeCandidates(BaseModel):
+    items: list[JokeCandidate] = Field(default_factory=list)
+
+
+class PairwiseVerdict(BaseModel):
+    """Pairwise comparison of two candidates (Bradley-Terry style — pairwise
+    beats absolute 1-10 scoring for humor preference)."""
+
+    winner: int = 0               # 0 or 1
+    violation_strength: float = 0.0   # 0..1 for the winner
+    benignness: float = 0.0           # 0..1 for the winner
+    guessable: bool = False           # could the punchline be predicted from the setup?
+    reasoning: str = ""
+
+
+class GuessCheck(BaseModel):
+    """Predictability filter — completions of the setup WITHOUT seeing the punch."""
+
+    completions: list[str] = Field(default_factory=list)
 
 
 class SentimentResult(BaseModel):

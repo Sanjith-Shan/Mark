@@ -51,6 +51,7 @@ class MediaConfig(_Base):
     image_quality: str = "medium"
     video_model: str = "fal-ai/kling-video/v3/standard/text-to-video"
     video_fallback: str = "fal-ai/wan/v2.7/text-to-video"
+    video_i2v_model: str = "fal-ai/kling-video/v3/standard/image-to-video"  # character consistency
     video_duration: int = 8
     video_resolution: str = "720p"
     tts_provider: str = "openai"
@@ -72,6 +73,29 @@ class ApprovalConfig(_Base):
     auto_approve_types: list[str] = Field(default_factory=list)
 
 
+class HumorConfig(_Base):
+    """The comedy pipeline: violation search → scaffolded fan-out → pairwise rank
+    → predictability filter. Applied when a strategy sets humor_level != none."""
+
+    enabled: bool = True
+    candidates: int = 6            # scaffolded joke candidates per piece ("full" humor)
+    candidates_light: int = 3      # candidates when humor_level == "light"
+    min_violation: float = 0.5     # BVT gate: below this = bland corporate safety
+    min_benignness: float = 0.5    # BVT gate: below this = off-brand offense
+    predictability_filter: bool = True  # kill jokes whose punchline is guessable
+    model: str = ""                # override model for humor gen ("" = llm.text_model)
+
+
+class TrendsConfig(_Base):
+    """Real-time trend reaction — the fast path from a spiking trend to a draft."""
+
+    auto_react: bool = False            # generate content the moment a hot trend appears
+    react_threshold: float = 0.55       # min trend_score to be considered "hot"
+    min_velocity: float = 0.0           # min score delta vs last sighting (0 = new or rising)
+    max_reactions_per_day: int = 2      # per product — trend-jacking everything is spam
+    react_platforms: list[str] = Field(default_factory=list)  # [] = all enabled platforms
+
+
 class Settings(_Base):
     """The whole of ``default.yaml``."""
 
@@ -81,6 +105,8 @@ class Settings(_Base):
     media: MediaConfig = Field(default_factory=MediaConfig)
     scheduling: SchedulingConfig = Field(default_factory=SchedulingConfig)
     approval: ApprovalConfig = Field(default_factory=ApprovalConfig)
+    trends: TrendsConfig = Field(default_factory=TrendsConfig)
+    humor: HumorConfig = Field(default_factory=HumorConfig)
 
     def enabled_platforms(self) -> list[str]:
         return [name for name, p in self.platforms.items() if p.enabled]
@@ -100,6 +126,8 @@ class ProductConfig(_Base):
     website_url: Optional[str] = None
     platforms: list[str] = Field(default_factory=list)
     posting_cadence: dict[str, int] = Field(default_factory=dict)
+    strategies: Optional[list[str]] = None  # allowlist of strategy ids (None = all)
+    specificity_bank: list[str] = Field(default_factory=list)  # concrete audience-life artifacts (humor fuel)
 
 
 # --------------------------------------------------------------------------- #

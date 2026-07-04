@@ -29,7 +29,8 @@ WIDTH, HEIGHT, FPS = 1080, 1920, 30
 _FAL_PRICE_PER_SEC = {"kling": 0.10, "wan": 0.05, "veo": 0.25}
 
 
-def produce_video(app: App, llm: LLM, product: dict, content_id: int, plan, draft, out_dir: Path) -> dict:
+def produce_video(app: App, llm: LLM, product: dict, content_id: int, plan, draft,
+                  out_dir: Path, character: dict | None = None) -> dict:
     if not shutil.which("ffmpeg"):
         raise RuntimeError("ffmpeg not found — required for video assembly")
 
@@ -37,13 +38,15 @@ def produce_video(app: App, llm: LLM, product: dict, content_id: int, plan, draf
     out_dir.mkdir(parents=True, exist_ok=True)
     script = (draft.script or draft.caption or plan.topic).strip()
 
-    # 1) Voiceover.
+    # 1) Voiceover (in the character's voice when one fronts this content).
+    voice = (character or {}).get("voice") or None
     audio_path, duration = tts.synthesize(
-        app, llm, script, out_dir / f"{content_id}_voice",
+        app, llm, script, out_dir / f"{content_id}_voice", voice=voice,
         content_id=content_id, product_id=product["id"])
 
     # 2) Background visual (AI video if fal is live, else a generated image).
-    bg_path, bg_is_video = _background(app, llm, product, content_id, plan, draft, out_dir, duration)
+    bg_path, bg_is_video = _background(app, llm, product, content_id, plan, draft,
+                                       out_dir, duration, character=character)
 
     # 3) Captions.
     words = captions_mod.word_timestamps(app, audio_path, script, duration)
@@ -61,18 +64,40 @@ def produce_video(app: App, llm: LLM, product: dict, content_id: int, plan, draf
 # --------------------------------------------------------------------------- #
 # Background
 # --------------------------------------------------------------------------- #
-def _background(app, llm, product, content_id, plan, draft, out_dir, duration):
+def _background(app, llm, product, content_id, plan, draft, out_dir, duration,
+                character: dict | None = None):
     prompt = draft.video_prompt or draft.image_prompt or plan.topic
+
+    # Character consistency: render a scene still conditioned on the character's
+    # reference sheet, then animate THAT frame (image-to-video). The identity is
+    # locked in the first frame, which is how virtual-influencer creators keep a
+    # face stable across clips.
+    first_frame = None
+    if character and character.get("reference_image"):
+        from .. import characters as characters_mod
+
+        scene = characters_mod.scene_prompt(character, prompt)
+        frame = out_dir / f"{content_id}_scene.png"
+        try:
+            images.generate_image(app, llm, scene, frame, size="1024x1536",
+                                  reference_images=[character["reference_image"]],
+                                  content_id=content_id, product_id=product["id"])
+            first_frame = frame
+        except Exception:
+            first_frame = None
+
     if not app.is_mock("fal"):
         try:
             path = _ai_video(app, prompt, duration, out_dir / f"{content_id}_broll.mp4",
-                             content_id, product["id"])
+                             content_id, product["id"], first_frame=first_frame)
             return path, True
         except Exception as exc:  # fall through to image background — but say so
             import logging
 
             logging.getLogger("mark.video").warning(
                 "fal video generation failed, using image background: %s", exc)
+    if first_frame is not None:
+        return first_frame, False
     # Image background (works offline).
     img = out_dir / f"{content_id}_bg.png"
     images.generate_image(app, llm, prompt, img, size="1024x1536",
@@ -81,13 +106,28 @@ def _background(app, llm, product, content_id, plan, draft, out_dir, duration):
 
 
 def _ai_video(app: App, prompt: str, duration: float, out_path: Path,
-              content_id, product_id) -> Path:
+              content_id, product_id, first_frame: Path | None = None) -> Path:
     import httpx
     import fal_client  # type: ignore
 
     os.environ.setdefault("FAL_KEY", app.keys.fal or "")
-    model = app.settings.media.video_model
     seconds = int(min(max(duration, 3), 10))
+
+    if first_frame is not None:
+        # Image-to-video keeps the character identity from the conditioned still.
+        model = app.settings.media.video_i2v_model
+        image_url = fal_client.upload_file(str(first_frame))
+        result = fal_client.subscribe(model, arguments={
+            "prompt": prompt, "image_url": image_url,
+            "duration": str(seconds), "aspect_ratio": "9:16"})
+        url = result["video"]["url"] if isinstance(result.get("video"), dict) else result["video"]
+        out_path.write_bytes(httpx.get(url, timeout=300).content)
+        rate = next((v for k, v in _FAL_PRICE_PER_SEC.items() if k in model), 0.10)
+        log_external_cost(app, "fal", "video", model, usd=rate * seconds, units=seconds,
+                          content_id=content_id, product_id=product_id)
+        return out_path
+
+    model = app.settings.media.video_model
 
     def _run(m):
         # fal model schemas define duration as a string enum ("3".."15").

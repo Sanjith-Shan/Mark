@@ -139,24 +139,54 @@ def check_novelty(app: App, llm: LLM, product: dict, platform: str, draft) -> No
 # --------------------------------------------------------------------------- #
 # Generate
 # --------------------------------------------------------------------------- #
-def generate_one(app: App, llm: LLM, product: dict, platform: str) -> dict:
+def generate_one(app: App, llm: LLM, product: dict, platform: str,
+                 forced_trend: Optional[dict] = None) -> dict:
+    from . import characters as characters_mod
+    from . import strategies as strategies_mod
+
     ctx = gather_context(app, llm, product, platform)
+    if forced_trend:
+        # Fast path: this generation exists to ride ONE specific trend. It goes
+        # first in context, and the strategist is told it's non-negotiable.
+        ctx["trends"] = [forced_trend] + [
+            t for t in ctx["trends"]
+            if t.get("topic", "").lower() != forced_trend.get("topic", "").lower()]
+
+    bandit_strategy = ctx["bandit_picks"].get("strategy")
+    if forced_trend and strategies_mod.get("trend-jack"):
+        bandit_strategy = "trend-jack"  # trend reactions use the trend-jack playbook
+    strategy = strategies_mod.pick(app, product, platform, bandit_choice=bandit_strategy)
+    episode = strategies_mod.episode_number(app, product, platform, strategy) if strategy else 1
+    character = characters_mod.resolve_for_content(app, product, strategy)
+    if character:
+        try:
+            characters_mod.ensure_reference_image(app, llm, character)
+        except Exception:
+            pass  # media falls back to unconditioned generation
+
     plan = strategist.plan_content(
         app, llm, product, platform,
         trends=ctx["trends"], winners=ctx["winners"], bandit_picks=ctx["bandit_picks"],
+        strategy=strategy, episode=episode, forced_trend=forced_trend,
     )
+    if forced_trend and not plan.trend_tie_in:
+        plan.trend_tie_in = forced_trend.get("topic")
 
     examples = winner_examples(app, llm, product, platform, plan)
     feedback = recent_rejection_feedback(app, product, platform)
     draft = writer.write_content(app, llm, product, platform, plan,
-                                 winner_examples=examples, user_feedback=feedback)
+                                 winner_examples=examples, user_feedback=feedback,
+                                 strategy=strategy, episode=episode, character=character,
+                                 bandit_picks=ctx["bandit_picks"])
 
     # Novelty guard — one regeneration attempt with a "make it different" nudge.
     novelty = check_novelty(app, llm, product, platform, draft)
     if not novelty.ok:
         draft = writer.write_content(app, llm, product, platform, plan,
                                      winner_examples=examples, user_feedback=feedback,
-                                     novelty_similar=novelty.similar_caption)
+                                     novelty_similar=novelty.similar_caption,
+                                     strategy=strategy, episode=episode, character=character,
+                                     bandit_picks=ctx["bandit_picks"])
         novelty = check_novelty(app, llm, product, platform, draft)
 
     strategy_context = {
@@ -164,6 +194,14 @@ def generate_one(app: App, llm: LLM, product: dict, platform: str) -> dict:
         "tone": plan.tone, "trend_tie_in": plan.trend_tie_in, "reasoning": plan.reasoning,
         "novelty_max_sim": round(novelty.max_sim, 4),
         "bandit_picks": ctx["bandit_picks"],
+        "strategy": strategy.id if strategy else None,
+        "strategy_name": strategy.name if strategy else None,
+        "episode": episode if strategy and strategy.series_format else None,
+        "character_id": character["id"] if character else None,
+        "character": character["name"] if character else None,
+        "forced_trend": forced_trend.get("topic") if forced_trend else None,
+        "humor_mechanism": draft.humor_mechanism,
+        "humor_persona": draft.humor_persona,
     }
 
     # Save the draft FIRST (spec: content is always reviewable; also gives us an id
@@ -178,7 +216,8 @@ def generate_one(app: App, llm: LLM, product: dict, platform: str) -> dict:
     )
 
     # Media generation with the spec-mandated fallback (video fails → try image).
-    media = _produce_media_with_fallback(app, llm, product, content_id, plan, draft)
+    media = _produce_media_with_fallback(app, llm, product, content_id, plan, draft,
+                                         character=character)
     store.set_content_status(
         app.conn, content_id, "draft",
         content_type=plan.content_type, media_paths=media["media_paths"],
@@ -229,20 +268,24 @@ def _draft_from_content(content: dict):
 def regenerate_media(app: App, llm: LLM, content_id: int) -> dict:
     """Re-run media generation for a content row using its (possibly edited)
     stored draft — e.g. after the user tweaks the image prompt or script."""
+    from . import characters as characters_mod
+    from . import db as db_module
+
     content = store.get_content(app.conn, content_id)
     if not content:
         raise ValueError(f"content {content_id} not found")
     product = store.get_product(app.conn, content["product_id"])
     plan = _plan_from_content(content)
     draft = _draft_from_content(content)
+    sctx = db_module.loads(content.get("strategy_context"), {}) or {}
+    character = characters_mod.get(app, sctx["character_id"]) if sctx.get("character_id") else None
 
-    media = _produce_media_with_fallback(app, llm, product, content_id, plan, draft)
+    media = _produce_media_with_fallback(app, llm, product, content_id, plan, draft,
+                                         character=character)
     store.update_content(app.conn, content_id,
                          content_type=plan.content_type,
                          media_paths=media["media_paths"], media_urls=media["media_urls"],
                          error=None)
-    from . import db as db_module
-
     db_module.log_activity(app.conn, "media",
                            f"Regenerated media for content #{content_id}",
                            product_id=product["id"], content_id=content_id)
@@ -253,25 +296,30 @@ def rewrite_content(app: App, llm: LLM, content_id: int,
                     instruction: Optional[str] = None) -> dict:
     """Rewrite a draft's copy (optionally steered by a user instruction), keeping
     the same plan. Media is NOT regenerated automatically — the caller decides."""
+    from . import db as db_module
+    from . import strategies as strategies_mod
+
     content = store.get_content(app.conn, content_id)
     if not content:
         raise ValueError(f"content {content_id} not found")
     product = store.get_product(app.conn, content["product_id"])
     platform = content["platform"]
     plan = _plan_from_content(content)
+    sctx = db_module.loads(content.get("strategy_context"), {}) or {}
+    strategy = strategies_mod.get(sctx.get("strategy") or "")
+    episode = sctx.get("episode") or 1
 
     examples = winner_examples(app, llm, product, platform, plan)
     feedback = recent_rejection_feedback(app, product, platform)
     if instruction:
         feedback = [instruction] + feedback
     draft = writer.write_content(app, llm, product, platform, plan,
-                                 winner_examples=examples, user_feedback=feedback)
+                                 winner_examples=examples, user_feedback=feedback,
+                                 strategy=strategy, episode=episode)
 
     store.update_content(app.conn, content_id,
                          caption=draft.caption, hashtags=draft.hashtags, hook=draft.hook,
                          draft=draft.model_dump())
-    from . import db as db_module
-
     db_module.log_activity(app.conn, "rewrite",
                            f"Rewrote copy for content #{content_id}"
                            + (f" — “{instruction[:60]}”" if instruction else ""),
@@ -279,9 +327,11 @@ def rewrite_content(app: App, llm: LLM, content_id: int,
     return store.get_content(app.conn, content_id)
 
 
-def _produce_media_with_fallback(app, llm, product, content_id, plan, draft) -> dict:
+def _produce_media_with_fallback(app, llm, product, content_id, plan, draft,
+                                 character: Optional[dict] = None) -> dict:
     try:
-        return media_orch.produce_media(app, llm, product, content_id, plan, draft)
+        return media_orch.produce_media(app, llm, product, content_id, plan, draft,
+                                        character=character)
     except Exception as exc:  # noqa: BLE001
         if plan.content_type in ("image", "text", "thread"):
             # Nothing simpler to fall back to.

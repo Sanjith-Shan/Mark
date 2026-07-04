@@ -25,13 +25,23 @@ def plan_content(
     trends: Optional[list[dict]] = None,
     winners: Optional[list[dict]] = None,
     bandit_picks: Optional[dict] = None,
+    strategy=None,
+    episode: int = 1,
+    forced_trend: Optional[dict] = None,
 ) -> ContentPlan:
     trends = trends or []
     winners = winners or []
     bandit_picks = bandit_picks or {}
     allowed = app.settings.platform(platform).content_types or ["text"]
+    if strategy is not None:
+        # Narrow to the strategy's preferred types when they're allowed here.
+        preferred = [t for t in strategy.content_types if t in allowed]
+        if preferred:
+            allowed = preferred
 
-    system = prompts.strategist_system(product, platform, trends, winners, bandit_picks, allowed)
+    system = prompts.strategist_system(product, platform, trends, winners, bandit_picks,
+                                       allowed, strategy=strategy, episode=episode,
+                                       forced_trend=forced_trend)
     user = prompts.strategist_user(platform)
 
     plan = llm.parse(

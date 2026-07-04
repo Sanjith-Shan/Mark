@@ -25,9 +25,12 @@ def media_dir_for(app: App, product_id: str, content_id: int) -> Path:
     return d
 
 
-def produce_media(app: App, llm: LLM, product: dict, content_id: int, plan, draft) -> dict:
+def produce_media(app: App, llm: LLM, product: dict, content_id: int, plan, draft,
+                  character: dict = None) -> dict:
     """Generate all media for a piece of content. Raises on hard failure so the
-    caller can apply the video→image fallback."""
+    caller can apply the video→image fallback. When ``character`` is set, image
+    and video generation are conditioned on its reference sheet so the same
+    face/outfit appears in every asset."""
     ct = plan.content_type
     if ct in ("text", "thread"):
         return {"media_paths": [], "media_urls": []}
@@ -35,10 +38,18 @@ def produce_media(app: App, llm: LLM, product: dict, content_id: int, plan, draf
     out_dir = media_dir_for(app, product["id"], content_id)
     size = images.platform_size(plan.platform, ct)
 
+    refs = None
+    prompt = draft.image_prompt or plan.topic
+    if character and character.get("reference_image"):
+        from .. import characters as characters_mod
+
+        refs = [character["reference_image"]]
+        prompt = characters_mod.scene_prompt(character, prompt)
+
     if ct == "image":
         path = out_dir / f"{content_id}_{plan.platform}_image.png"
-        images.generate_image(app, llm, draft.image_prompt or plan.topic, path,
-                              size=size, content_id=content_id, product_id=product["id"])
+        images.generate_image(app, llm, prompt, path, size=size, reference_images=refs,
+                              content_id=content_id, product_id=product["id"])
         return {"media_paths": [str(path)], "media_urls": []}
 
     if ct == "carousel":
@@ -47,7 +58,8 @@ def produce_media(app: App, llm: LLM, product: dict, content_id: int, plan, draf
     if ct == "video":
         from ..media import video  # lazy: keeps the video stack optional
 
-        result = video.produce_video(app, llm, product, content_id, plan, draft, out_dir)
+        result = video.produce_video(app, llm, product, content_id, plan, draft, out_dir,
+                                     character=character)
         return {"media_paths": result["media_paths"], "media_urls": []}
 
     # Unknown type → treat as image.

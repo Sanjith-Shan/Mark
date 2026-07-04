@@ -22,3 +22,19 @@ posting_cadence:
   linkedin: 1
   youtube: 1
   bluesky: 2
+
+# Concrete artifacts of the audience's life — the humor engine's raw material.
+# Specific beats generic: every joke pulls from these. Keep this list alive.
+specificity_bank:
+  - 'the Workday account you made for exactly one application in 2023'
+  - '"we''ve decided to move forward with other candidates" at 11:47pm on a Saturday'
+  - 'entry-level position, 5 years of experience required'
+  - 'the one-way video interview where you talk to a wall for 20 minutes'
+  - 'rewriting "worked at a smoothie shop" as "optimized high-throughput beverage operations"'
+  - 'the LinkedIn post that starts "I''m humbled to announce"'
+  - 'ghost jobs that have been "actively hiring" since 2024'
+  - 'the personality quiz asking if you STRONGLY AGREE that you love conflict'
+  - 'attaching your resume and then retyping your entire resume field by field'
+  - '"competitive salary" (they will not tell you the salary)'
+  - 'the rejection email that opens with "We were truly impressed by your background"'
+  - 'refreshing your application portal status like it''s a tracking number'

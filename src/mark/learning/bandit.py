@@ -17,7 +17,7 @@ import numpy as np
 
 from .. import db as db_module
 from ..app import App
-from ..constants import HOOK_STYLES, TONES
+from ..constants import HOOK_STYLES, HUMOR_MECHANISMS, HUMOR_PERSONAS, TONES
 
 _rng = np.random.default_rng()
 
@@ -27,13 +27,21 @@ def _now() -> str:
 
 
 def candidate_values(app: App, platform: str) -> dict[str, list[str]]:
+    from .. import strategies as strategies_mod  # lazy: avoids import cycles
+
     pconf = app.settings.platform(platform)
-    return {
+    values = {
         "hook_style": HOOK_STYLES,
         "content_type": pconf.content_types or ["text"],
         "tone": TONES,
         "post_time": pconf.optimal_times or ["12:00"],
+        "humor_mechanism": HUMOR_MECHANISMS,
+        "humor_persona": HUMOR_PERSONAS,
     }
+    strategy_ids = strategies_mod.candidate_ids(app, platform)
+    if strategy_ids:
+        values["strategy"] = strategy_ids
+    return values
 
 
 def _get_or_create_arm(app: App, arm_type: str, arm_value: str,
@@ -93,6 +101,9 @@ def update_from_content(app: App, content: dict, reward: float,
         "content_type": content.get("content_type"),
         "tone": sctx.get("tone"),
         "post_time": post_time,
+        "strategy": sctx.get("strategy"),
+        "humor_mechanism": sctx.get("humor_mechanism"),
+        "humor_persona": sctx.get("humor_persona"),
     }
     for arm_type, value in mapping.items():
         if value:

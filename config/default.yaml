@@ -62,6 +62,7 @@ media:
   image_quality: "medium"                # "low", "medium", "high"
   video_model: "fal-ai/kling-video/v3/standard/text-to-video"   # ~$0.13/s w/ audio — best value
   video_fallback: "fal-ai/wan/v2.7/text-to-video"               # $0.10/s fallback
+  video_i2v_model: "fal-ai/kling-video/v3/standard/image-to-video"  # character-consistent video
   video_duration: 8                      # seconds
   video_resolution: "720p"
   tts_provider: "openai"                 # "openai" or "elevenlabs"
@@ -72,9 +73,25 @@ scheduling:
   timezone: "America/Los_Angeles"
   content_generation_cron: "0 6 * * *"        # Generate content daily at 6am
   analytics_collection_cron: "0 */6 * * *"     # Collect analytics every 6 hours
-  trend_monitoring_cron: "0 8,16 * * *"        # Monitor trends twice daily
+  trend_monitoring_cron: "0 */3 * * *"         # Monitor trends every 3h — trend windows are short
   feedback_loop_cron: "0 0 * * 0"              # Weekly feedback loop analysis
   posting_jitter_minutes: 15                   # +/- random jitter on scheduled posting times
+
+humor:
+  enabled: true
+  candidates: 6                # Scaffolded joke candidates per piece (full humor)
+  candidates_light: 3          # Candidates when a strategy wants only light humor
+  min_violation: 0.5           # BVT gate — below this the joke is bland corporate safety
+  min_benignness: 0.5          # BVT gate — below this the joke punches wrong
+  predictability_filter: true  # Kill jokes whose punchline can be guessed from the setup
+  model: ""                    # Override model for humor generation ("" = llm.text_model)
+
+trends:
+  auto_react: false            # Draft trend-riding content the moment a hot trend appears
+  react_threshold: 0.55        # Min trend_score (relevance × popularity) to count as "hot"
+  min_velocity: 0.0            # Skip falling trends (late meme = brand cringe)
+  max_reactions_per_day: 2     # Per product — don't trend-jack everything
+  react_platforms: []          # [] = all enabled platforms
 
 approval:
   auto_approve: false                    # Set true once you trust the output
