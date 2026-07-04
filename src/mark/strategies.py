@@ -138,9 +138,13 @@ STRATEGIES: list[Strategy] = [
             "plausibility is the benign anchor, the real system's cruelty is the violation."
         ),
         writer_brief=(
-            "The image text IS the joke — write exact UI copy (labels, buttons, tooltips, "
-            "counters). Caption: ONE dry lowercase line, no explanation. UI text must be "
-            "short enough to render pixel-perfect."
+            "The image text IS the joke — write exact UI copy. Fill slide_texts as the "
+            "renderer spec: line 1 = window title; then rows, each prefixed with one of "
+            "'text:', 'field:', 'button:', 'button_disabled:', 'tooltip:', 'counter:', "
+            "'toggle:' (e.g. \"field: Please re-type your resume\", "
+            "\"button_disabled: Autofill\", \"tooltip: Autofill is a premium feature for "
+            "employers only\"). 4-7 rows; every row carries part of the joke. Caption: "
+            "ONE dry lowercase line, no explanation."
         ),
         media_brief=(
             "Deterministic UI composition: clean form fields, buttons, toggles in "
@@ -530,9 +534,12 @@ STRATEGIES: list[Strategy] = [
             "just texted me at 11pm…')."
         ),
         writer_brief=(
-            "Script as a message thread, line by line with sender labels. Cliffhanger "
-            "beat every ~8 seconds. Humor engine on the punch messages. Product placed "
-            "as an incidental mid-story mention at most."
+            "Write `script` as the message thread, ONE message per line in the exact "
+            "form 'Sender: message' (use 'Me:' for our side; short names for others; a "
+            "bare line renders as a narrator card). 12-30 messages. First message must "
+            "be a scroll-stopper; cliffhanger beat roughly every 5 messages. Humor "
+            "engine on the punch messages. Product placed as an incidental mid-story "
+            "mention at most."
         ),
         media_brief="Chat-bubble compositor over gameplay b-roll; typed-message pacing synced to beats.",
         example_sketches=[

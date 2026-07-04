@@ -218,7 +218,7 @@ def generate_one(app: App, llm: LLM, product: dict, platform: str,
 
     # Media generation with the spec-mandated fallback (video fails → try image).
     media = _produce_media_with_fallback(app, llm, product, content_id, plan, draft,
-                                         character=character)
+                                         character=character, strategy=strategy)
     store.set_content_status(
         app.conn, content_id, "draft",
         content_type=plan.content_type, media_paths=media["media_paths"],
@@ -272,6 +272,7 @@ def regenerate_media(app: App, llm: LLM, content_id: int) -> dict:
     stored draft — e.g. after the user tweaks the image prompt or script."""
     from . import characters as characters_mod
     from . import db as db_module
+    from . import strategies as strategies_mod
 
     content = store.get_content(app.conn, content_id)
     if not content:
@@ -281,9 +282,10 @@ def regenerate_media(app: App, llm: LLM, content_id: int) -> dict:
     draft = _draft_from_content(content)
     sctx = db_module.loads(content.get("strategy_context"), {}) or {}
     character = characters_mod.get(app, sctx["character_id"]) if sctx.get("character_id") else None
+    strategy = strategies_mod.get(sctx.get("strategy") or "")
 
     media = _produce_media_with_fallback(app, llm, product, content_id, plan, draft,
-                                         character=character)
+                                         character=character, strategy=strategy)
     store.update_content(app.conn, content_id,
                          content_type=plan.content_type,
                          media_paths=media["media_paths"], media_urls=media["media_urls"],
@@ -370,7 +372,7 @@ def adapt_content(app: App, llm: LLM, source_content_id: int,
         hashtags=draft.hashtags, hook=draft.hook, media_paths=[], media_urls=[],
         strategy_context=new_sctx, status="draft", draft=draft.model_dump())
     media = _produce_media_with_fallback(app, llm, product, content_id, plan, draft,
-                                         character=character)
+                                         character=character, strategy=strategy)
     store.set_content_status(app.conn, content_id, "draft",
                              content_type=plan.content_type,
                              media_paths=media["media_paths"],
@@ -385,10 +387,10 @@ def adapt_content(app: App, llm: LLM, source_content_id: int,
 
 
 def _produce_media_with_fallback(app, llm, product, content_id, plan, draft,
-                                 character: Optional[dict] = None) -> dict:
+                                 character: Optional[dict] = None, strategy=None) -> dict:
     try:
         return media_orch.produce_media(app, llm, product, content_id, plan, draft,
-                                        character=character)
+                                        character=character, strategy=strategy)
     except Exception as exc:  # noqa: BLE001
         if plan.content_type in ("image", "text", "thread"):
             # Nothing simpler to fall back to.

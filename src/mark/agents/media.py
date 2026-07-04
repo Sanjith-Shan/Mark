@@ -26,17 +26,40 @@ def media_dir_for(app: App, product_id: str, content_id: int) -> Path:
 
 
 def produce_media(app: App, llm: LLM, product: dict, content_id: int, plan, draft,
-                  character: dict = None) -> dict:
+                  character: dict = None, strategy=None) -> dict:
     """Generate all media for a piece of content. Raises on hard failure so the
     caller can apply the video→image fallback. When ``character`` is set, image
     and video generation are conditioned on its reference sheet so the same
-    face/outfit appears in every asset."""
+    face/outfit appears in every asset. Some strategies use dedicated
+    deterministic renderers (UI mockups, chat-drama videos) where text fidelity
+    or zero-AI-labeling matters more than generative visuals."""
     ct = plan.content_type
     if ct in ("text", "thread"):
         return {"media_paths": [], "media_urls": []}
 
     out_dir = media_dir_for(app, product["id"], content_id)
     size = images.platform_size(plan.platform, ct)
+    strategy_id = getattr(strategy, "id", None)
+
+    # Satirical UI mockups: the joke IS the interface text — render it
+    # deterministically so it's pixel-perfect (models garble UI copy).
+    if strategy_id == "satirical-ui-franchise" and ct in ("image", "carousel"):
+        from ..media import uikit
+
+        spec = draft.slide_texts or [draft.hook, draft.caption]
+        path = out_dir / f"{content_id}_{plan.platform}_mockup.png"
+        uikit.render_ui_mockup(app, spec, path, size=size)
+        return {"media_paths": [str(path)], "media_urls": []}
+
+    # Fake-text drama: chat-bubble video compositor (no AI media, no labeling).
+    if strategy_id == "fake-text-drama" and ct == "video":
+        from ..media import chatdrama
+
+        script = draft.script or draft.caption or ""
+        path = out_dir / f"{content_id}_{plan.platform}_chatdrama.mp4"
+        chatdrama.render_chat_video(app, script, path,
+                                    title=(plan.topic or "the group chat")[:38])
+        return {"media_paths": [str(path)], "media_urls": []}
 
     refs = None
     prompt = draft.image_prompt or plan.topic

@@ -308,6 +308,45 @@ def test_cascade_adapts_winner_cross_platform(app, llm, product):
     assert sctx["cascade_source_platform"] == "x"
 
 
+def test_ui_mockup_renderer(app, tmp_path):
+    from mark.media import uikit
+
+    p = uikit.render_ui_mockup(app, [
+        "TalentPortal", "text: Application received.",
+        "field: Re-type your resume", "button_disabled: Autofill",
+        "tooltip: Premium feature", "counter: applicants 2,847",
+        "button: Submit",
+    ], tmp_path / "mock.png", size="1024x1024")
+    assert p.exists() and p.stat().st_size > 5000
+    # Degenerate spec still renders.
+    p2 = uikit.render_ui_mockup(app, [], tmp_path / "mock2.png")
+    assert p2.exists()
+
+
+def test_chat_drama_script_parsing():
+    from mark.media import chatdrama
+
+    msgs = chatdrama.parse_script(
+        "Me: hello\nSam: hi there\na narrator line\nMe: bye")
+    assert len(msgs) == 4
+    assert msgs[0]["mine"] and not msgs[1]["mine"]
+    assert msgs[2]["sender"] is None
+
+
+def test_strategy_renderer_routing(app, llm, product):
+    from mark import pipeline
+
+    store.update_product(app.conn, product["id"],
+                         strategies=["satirical-ui-franchise"])
+    fresh = store.get_product(app.conn, product["id"])
+    row = pipeline.generate_one(app, llm, fresh, "x")
+    sctx = db_module.loads(row["strategy_context"], {})
+    assert sctx["strategy"] == "satirical-ui-franchise"
+    paths = db_module.loads(row["media_paths"], [])
+    if paths:  # image content routed through the deterministic mockup renderer
+        assert any("mockup" in p for p in paths)
+
+
 def test_reply_drafting_and_sensitive_gate(app, llm, product):
     from mark import replies
 
