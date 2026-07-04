@@ -64,6 +64,19 @@ def post_content(app: App, content: dict, *, client: Optional[UploadPostClient] 
     opts = (db_module.loads(prod.get("platform_options"), {}) or {}) if prod else {}
     extra = dict(opts.get(platform) or {})
 
+    # AI-content self-labeling: proactively labeled AIGC loses far less reach
+    # than retroactively flagged content (and undisclosed synthetic video risks
+    # 14-day suppression on TikTok). AI-slop and character content is synthetic
+    # by design; AI-generated video counts too.
+    sctx = db_module.loads(content.get("strategy_context"), {}) or {}
+    synthetic = (sctx.get("strategy") in ("absurdist-ai-slop",)
+                 or bool(sctx.get("character_id"))
+                 or (ctype == "video" and not app.is_mock("fal")))
+    if synthetic and platform == "tiktok":
+        extra.setdefault("is_aigc", True)   # TikTok Content Posting API AIGC flag
+    if synthetic and platform in ("instagram", "youtube"):
+        extra.setdefault("is_ai_generated", True)  # passed through if supported
+
     try:
         if ctype == "video":
             if not media:

@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from .. import db as db_module
 from ..app import App
 from ..llm import LLM
-from . import bluesky, google_trends, reddit, tiktok
+from . import bluesky, google_trends, imgflip, reddit, tiktok
 
 
 class _ScoredTrend(BaseModel):
@@ -37,7 +37,8 @@ def refresh(app: App, llm: LLM, product: dict, limit_per_source: int = 15) -> li
     raw = (tiktok.fetch_trending(app, limit=limit_per_source)
            + google_trends.fetch(app, limit=limit_per_source)
            + reddit.fetch(app, subreddits=_subreddits(app), limit=limit_per_source)
-           + bluesky.fetch(app, limit=limit_per_source))
+           + bluesky.fetch(app, limit=limit_per_source)
+           + imgflip.fetch(app, limit=min(limit_per_source, 10)))
     return _score_and_store(app, llm, product, raw)
 
 

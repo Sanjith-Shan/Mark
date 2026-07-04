@@ -27,7 +27,8 @@ mark web --autopilot    # start with the autonomous scheduler running
 | **Campaigns** | Run many products at once — create/edit/pause/archive, per-platform cadence, subreddit & Pinterest board options |
 | **Studio** | Review queue with media previews. Edit any caption, hook, hashtag, script, or image prompt. AI rewrite with your instruction, regenerate media, approve/reject (rejection feedback is learned from), post now |
 | **Analytics** | Engagement and views per platform per day, top content, comments with sentiment |
-| **Trends** | Live trending topics ranked by relevance to your campaign, with notes on how creators are executing each trend |
+| **Trends** | Live trending topics with lifecycle stages (new/rising/mature/declining), velocity, a "Hot right now" rail, and one-click **Ride this trend** |
+| **Playbook** | The 12-strategy catalog — enable/disable per campaign, see platform fit, humor level, usage — plus AI ambassador characters: edit personas, generate reference sheets, watch the lore counters |
 | **Learn** | What's working: best hooks/types/times per platform, analyzer recommendations, bandit leaderboard |
 | **Autopilot** | One switch for the full loop: trends → generate → post at optimal times → analytics → weekly learning. Upcoming runs + live job progress |
 | **Settings** | Provider status, connected accounts, models, approval policy, schedule, spend |
@@ -67,38 +68,65 @@ upload-post.com — connect your socials on their dashboard),
 ## The loop
 
 ```
-STRATEGIST  decides what to post (topic, format, angle, hook, tone)
+STRATEGY    picks a named playbook (12-strategy catalog, learned per platform)
+    │         pain-point POVs · satirical UI franchise · educational hooks ·
+    │         demo magic · unhinged mascot · absurdist AI slop · meme carousels ·
+    │         trend-jack · contrarian takes · social proof · fake-text drama ·
+    │         founder build log (draft-only)
+STRATEGIST  decides what to post (topic, angle, hook, ONE target emotion)
     │         ← live trends + RAG-of-winners + bandit recommendation
-WRITER      generates copy + media prompts
+    │         ← per-product knowledge pools (pain veins / fact base / take pool)
+WRITER      generates copy + media prompts (platform playbooks, 2026 rules)
     │         ← N variants → LLM judge → self-critique (anti-slop)
     │         ← your rejection feedback ("too generic") as hard requirements
+HUMOR       when the strategy calls for funny: violation search → joke scaffold
+    │         → 6-persona fan-out → pairwise judging (calibrated on YOUR
+    │         audience's real preferences) → predictability filter → punch last
+CHARACTER   mascot strategies front a persistent AI character (bible + lore +
+    │         reference-sheet visual consistency + pinned voice)
 NOVELTY     rejects near-duplicates — across ALL campaigns, so two products
     │         never post the same idea
 MEDIA       images (OpenAI+Pillow) / video (fal + TTS + word-level captions
-    │         + ffmpeg) / carousels with text overlays
-APPROVAL    review in the Studio (or auto-approve once you trust it)
-POST        upload-post.com at optimal times with jitter, per-day caps
-ANALYTICS   metrics every 6h + comment collection + sentiment
-FEEDBACK    engagement → bandit rewards, winners re-indexed, analyzer
-            insights → better next content
+    │         + ffmpeg; image-to-video for character consistency) / carousels
+APPROVAL    review in the Studio (or auto-approve once you trust it);
+    │         trend content EXPIRES (a dead meme can never post late)
+POST        upload-post.com at optimal times with jitter, per-day caps,
+    │         user-scheduled times honored
+ANALYTICS   metrics every 6h + comment collection + sentiment + reply drafts
+FEEDBACK    engagement → bandit rewards (strategy, humor mechanism, persona,
+            emotion, hook, type, time), winners re-indexed, judge calibration,
+            winner cascade to lagged platforms (TikTok → Reels day 2-4)
 ```
 
+**Real-time trend adaptation:** Reddit rising (niche subs) + Bluesky trending +
+Google RSS every 30 minutes, TikTok Creative Center on the slower cron. Trends
+get lifecycle stages (new/rising/mature/declining), safety + sound-dependency
+gates, and a hard veto on dying memes. With `trends.auto_react` on, a qualifying
+spike goes from detection to drafted content in minutes — target detection→live
+is 2-6 hours, faster than any human social team.
+
 The system **converges on what works for your audience, per campaign, per
-platform**: the Thompson-sampling bandit learns hook styles / formats / tones /
-posting times, and the RAG-of-winners feeds your best past posts back in as
-few-shot examples.
+platform**: the Thompson-sampling bandit learns strategies / humor mechanisms /
+personas / emotions / hooks / formats / times, the RAG-of-winners feeds your
+best past posts back as few-shot examples, and the comedy judge is calibrated
+monthly from your own engagement preference pairs.
+
+The research behind all of this lives in `docs/research/` —
+`MASTER-STRATEGY.md` is the source of truth the code encodes.
 
 ## CLI
 
 Everything is also scriptable: `mark init`, `mark product add/list/activate`,
 `mark generate`, `mark queue/preview/approve/reject`, `mark post`,
-`mark analytics`, `mark trends`, `mark learn`, `mark insights`, `mark status`,
-`mark run` (headless scheduler), `mark web`. Global flags: `--dry-run`, `--home`.
+`mark analytics`, `mark trends`, `mark react` (ride a hot trend now),
+`mark strategies`, `mark character list/sync/sheet`, `mark learn`,
+`mark insights`, `mark status`, `mark run` (headless scheduler), `mark web`.
+Global flags: `--dry-run`, `--home`.
 
 ## Development
 
 ```bash
-pytest                       # 24 tests, fully offline
+pytest                       # full suite, fully offline
 cd web && npm install && npm run dev    # frontend dev server (proxies to :8321)
 npm run build                # builds into src/mark/web/static (what `mark web` serves)
 

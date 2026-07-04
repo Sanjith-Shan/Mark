@@ -275,12 +275,17 @@ function CharacterCard(props: {
           <div className="field">
             <span className="field-label">Lore</span>
             <div className="row wrap" style={{ gap: 6 }}>
-              {lore.map(([k, v]) => (
-                <Pill key={k}>
-                  <span className="faint">{k}</span>{" "}
-                  {typeof v === "object" ? JSON.stringify(v) : String(v)}
-                </Pill>
-              ))}
+              {lore.map(([k, v]) => {
+                const full = typeof v === "object" ? JSON.stringify(v) : String(v);
+                const short = full.length > 36 ? `${full.slice(0, 36)}…` : full;
+                return (
+                  <Pill key={k}>
+                    <span title={full.length > 36 ? full : undefined}>
+                      <span className="faint">{k}</span> {short}
+                    </span>
+                  </Pill>
+                );
+              })}
             </div>
           </div>
         )}
