@@ -86,6 +86,23 @@ class HumorConfig(_Base):
     model: str = ""                # override model for humor gen ("" = llm.text_model)
 
 
+class LearningConfig(_Base):
+    """The evolution machinery — how evidence turns into better choices.
+
+    Rewards are graded (ratio/(ratio+1) around the per-platform baseline, so a
+    10x post earns far more than a 1.05x post), applied exactly once per post
+    after metrics mature, and old evidence decays so the system tracks a moving
+    audience instead of averaging over a dead one.
+    """
+
+    decay_half_life_days: float = 45.0  # evidence half-life (0 = never decay)
+    holdout_pct: float = 0.10           # ε of generations use a random policy — the
+                                        # live control group that PROVES learning lifts
+    reward_maturity_hours: int = 48     # a post is rewarded once, after this age
+    min_baseline_posts: int = 3         # measured posts a platform needs before rewards flow
+    strategy_prior_strength: float = 4.0  # pseudo-observations encoding research mix weights
+
+
 class TrendsConfig(_Base):
     """Real-time trend reaction — the fast path from a spiking trend to a draft."""
 
@@ -112,6 +129,7 @@ class Settings(_Base):
     approval: ApprovalConfig = Field(default_factory=ApprovalConfig)
     trends: TrendsConfig = Field(default_factory=TrendsConfig)
     humor: HumorConfig = Field(default_factory=HumorConfig)
+    learning: LearningConfig = Field(default_factory=LearningConfig)
 
     def enabled_platforms(self) -> list[str]:
         return [name for name, p in self.platforms.items() if p.enabled]

@@ -184,6 +184,41 @@ CREATE TABLE IF NOT EXISTS characters (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Small key/value store for learning bookkeeping (last decay pass, etc.).
+CREATE TABLE IF NOT EXISTS meta (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
+
+-- A/B experiments: campaigns as variants (the summer test-lab mechanism).
+CREATE TABLE IF NOT EXISTS experiments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    hypothesis TEXT,                   -- what difference between variants is being tested
+    campaign_ids TEXT NOT NULL,        -- JSON array of product ids acting as variants
+    metric TEXT DEFAULT 'engagement_rate',
+    status TEXT DEFAULT 'running',     -- "running", "concluded"
+    conclusion TEXT,                   -- filled when concluded
+    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    ended_at TIMESTAMP
+);
+
+-- First-class series bookkeeping (franchise compounding is the growth asset).
+CREATE TABLE IF NOT EXISTS series (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id TEXT NOT NULL REFERENCES products(id),
+    strategy_id TEXT NOT NULL,         -- which strategy this series runs under
+    premise TEXT NOT NULL,             -- the series concept, one line
+    platform TEXT,                     -- home platform (NULL = cross-platform)
+    episodes INTEGER DEFAULT 0,
+    avg_engagement REAL DEFAULT 0.0,
+    last_engagement TEXT,              -- JSON: trailing per-episode engagement rates
+    status TEXT DEFAULT 'active',      -- "active", "retired"
+    retired_reason TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP
+);
+
 CREATE INDEX IF NOT EXISTS idx_content_status ON content(status);
 CREATE INDEX IF NOT EXISTS idx_content_product ON content(product_id);
 CREATE INDEX IF NOT EXISTS idx_metrics_post ON metrics(post_id);
@@ -229,6 +264,16 @@ MIGRATIONS: list[tuple[str, str, str]] = [
     ("products", "knowledge", "TEXT"),         # JSON: {pain_veins: [], fact_base: [], take_pool: []}
     ("characters", "lore_state", "TEXT"),      # JSON: running counters, NPCs, active arcs
     ("content", "expires_at", "TIMESTAMP"),    # trend content TTL — never post a dead meme
+    # Evolution hardening: rewards are graded and applied exactly once per post.
+    ("posts", "rewarded_at", "TIMESTAMP"),     # when the learning loop consumed this post
+    ("posts", "reward", "REAL"),               # the graded reward it earned (0..1, 0.5 = baseline)
+    ("content", "qa", "TEXT"),                 # JSON: judge/critique quality scores (autonomy gating)
+    # Campaign generalization: content-as-the-business + per-campaign accounts.
+    ("products", "kind", "TEXT DEFAULT 'product'"),  # "product" | "entertainment"
+    ("products", "upload_profile", "TEXT"),    # per-campaign upload-post profile (multi-account)
+    ("products", "content_rating", "TEXT"),    # "clean" | "standard" | "edgy" (platform caps still apply)
+    ("products", "trend_sources", "TEXT"),     # JSON: {subreddits: [], keywords: []} per-campaign radar
+    ("products", "strategy_catalog", "TEXT"),  # JSON: campaign-adapted strategy briefs (onboarding output)
 ]
 
 
@@ -255,6 +300,19 @@ def _data_migrations(conn: sqlite3.Connection) -> None:
             "  (likes + comments + 2.0 * shares + 2.0 * saves)"
             "  / MAX(views, 1), 5)")
         conn.execute("PRAGMA user_version = 1")
+
+
+def get_meta(conn: sqlite3.Connection, key: str, default: Optional[str] = None) -> Optional[str]:
+    row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else default
+
+
+def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, str(value)))
+    conn.commit()
 
 
 def log_activity(conn: sqlite3.Connection, kind: str, message: str,
