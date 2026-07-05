@@ -25,12 +25,18 @@ def test_db_json_roundtrip(app):
 def test_product_active_switch(app):
     from mark.config import ProductConfig
 
+    # Adding a campaign never deactivates running ones (multi-campaign is the
+    # normal state — the summer test lab runs many at once).
     store.upsert_product(app.conn, ProductConfig(
         id="second", name="Second", description="d", target_audience="a",
         brand_voice="b", platforms=["x"], posting_cadence={"x": 1}), active=True)
-    assert store.get_active_product(app.conn)["id"] == "second"
+    actives = {p["id"] for p in store.list_products(app.conn) if p["active"]}
+    assert actives == {"testco", "second"}
+    # Explicit activation IS exclusive (CLI `product activate`).
     store.set_active_product(app.conn, "testco")
     assert store.get_active_product(app.conn)["id"] == "testco"
+    actives = {p["id"] for p in store.list_products(app.conn) if p["active"]}
+    assert actives == {"testco"}
 
 
 def test_vectors_cosine_and_blob():

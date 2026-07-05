@@ -57,20 +57,28 @@ def punch_up(
     bandit_picks: Optional[dict] = None,
     character: Optional[dict] = None,
     content_id: Optional[int] = None,
+    qa_out: Optional[dict] = None,
 ) -> ContentDraft:
     """Run the comedy pipeline over a draft. Returns the funnier draft, or the
     original unchanged if no candidate survives QA."""
+    from . import rating as rating_mod
+
     cfg = app.settings.humor
     if not cfg.enabled or level == "none":
         return draft
+    qa_out = qa_out if qa_out is not None else {}
     bandit_picks = bandit_picks or {}
     model = cfg.model or app.settings.llm.text_model
     n = max(2, int(cfg.candidates if level == "full" else cfg.candidates_light))
     bank = specificity_bank(product)
+    # The benignness gate moves with the campaign's content rating (and the
+    # platform's ceiling): an 'edgy' campaign may ship spikier jokes; a 'clean'
+    # one holds a higher bar. Hard bans live in the prompts at every rating.
+    min_benign = rating_mod.min_benignness(cfg.min_benignness, product, platform)
 
     # 1) Violation search.
     violation = _find_violation(app, llm, product, platform, plan, bank, model,
-                                content_id=content_id)
+                                content_id=content_id, min_benign=min_benign)
     if violation is None:
         return draft
 
@@ -89,7 +97,10 @@ def punch_up(
                             content_id=content_id, product_id=product["id"])
     if winner is None or verdict is None:
         return draft
-    if verdict.violation_strength < cfg.min_violation or verdict.benignness < cfg.min_benignness:
+    qa_out.update({"humor_violation_strength": verdict.violation_strength,
+                   "humor_benignness": verdict.benignness})
+    if verdict.violation_strength < cfg.min_violation or verdict.benignness < min_benign:
+        qa_out["humor_applied"] = False
         return draft  # bland or off-brand — ship the straight version instead
 
     # 4) Predictability filter: if the punchline is guessable, the joke is dead.
@@ -107,12 +118,14 @@ def punch_up(
             _, v = _rank(app, llm, product, platform, [c],
                          content_id=content_id, product_id=product["id"])
             if v and v.violation_strength >= cfg.min_violation \
-                    and v.benignness >= cfg.min_benignness:
+                    and v.benignness >= min_benign:
                 winner = c
                 break
         if winner is None:
+            qa_out["humor_applied"] = False
             return draft
 
+    qa_out["humor_applied"] = True
     return _apply(draft, winner, plan)
 
 
@@ -120,7 +133,7 @@ def punch_up(
 # Steps
 # --------------------------------------------------------------------------- #
 def _find_violation(app, llm, product, platform, plan, bank, model,
-                    content_id=None) -> Optional[Violation]:
+                    content_id=None, min_benign: Optional[float] = None) -> Optional[Violation]:
     result = llm.parse(
         prompts.violation_search_system(product, platform, bank),
         prompts.violation_search_user(plan.topic, plan.angle),
@@ -129,8 +142,9 @@ def _find_violation(app, llm, product, platform, plan, bank, model,
         mock_factory=lambda: _mock_violations(plan),
     )
     cfg = app.settings.humor
+    benign_bar = cfg.min_benignness if min_benign is None else min_benign
     viable = [v for v in result.items
-              if v.strength >= cfg.min_violation and v.benignness >= cfg.min_benignness]
+              if v.strength >= cfg.min_violation and v.benignness >= benign_bar]
     pool = viable or result.items
     if not pool:
         return None

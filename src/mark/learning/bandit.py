@@ -168,8 +168,14 @@ def decay(app: App, product_id: str, half_life_days: float) -> None:
     gamma = 0.5 ** (elapsed_days / half_life_days)
     if gamma >= 0.9999:
         return
-    # alpha,beta relax toward 1; pulls/total_reward relax with the same factor so
-    # avg_reward stays meaningful and track-record gates see decayed sample sizes.
+    decay_arms(app, product_id, gamma)
+
+
+def decay_arms(app: App, product_id: str, gamma: float) -> None:
+    """Rescale all of a product's posteriors toward Beta(1,1) by factor gamma.
+    alpha,beta relax toward 1; pulls/total_reward relax with the same factor so
+    avg_reward stays meaningful and track-record gates see decayed sample sizes.
+    (Split out from decay() so simulations can step time explicitly.)"""
     db_module.execute(
         app.conn,
         "UPDATE bandit_arms SET alpha = 1.0 + (alpha - 1.0) * ?, "

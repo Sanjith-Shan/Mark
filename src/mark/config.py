@@ -69,8 +69,32 @@ class SchedulingConfig(_Base):
 
 
 class ApprovalConfig(_Base):
-    auto_approve: bool = False
+    """Autonomy is earned, not toggled. Modes:
+
+    manual     — everything waits for human approval (plus auto_approve_types).
+    graduated  — auto-approve only when BOTH hold: the draft's QA scores clear
+                 the bar, AND this (strategy, platform) has a proven track
+                 record (enough rewarded posts at/above baseline). Trust
+                 expands automatically as evidence accumulates; a decayed or
+                 collapsed track record pulls approval back to the human.
+    full       — approve everything not marked never_auto_approve.
+    """
+
+    auto_approve: bool = False          # legacy switch; mode wins when set
     auto_approve_types: list[str] = Field(default_factory=list)
+    mode: str = ""                      # "", "manual", "graduated", "full"
+    min_track_record: int = 5           # rewarded posts a strategy+platform needs
+    qa_bar: float = 6.5                 # min avg judge score (0-10) to self-approve
+
+
+class SafetyConfig(_Base):
+    """Self-monitoring for unattended operation — the guardrails that make
+    full autonomy safe enough to actually leave running."""
+
+    collapse_window: int = 5            # trailing rewarded posts examined
+    collapse_threshold: float = 0.28    # avg graded reward below this = collapse
+    pause_hours: int = 48               # platform cool-down after a collapse
+    max_daily_spend_usd: float = 25.0   # freeze generation past this (real spend only)
 
 
 class HumorConfig(_Base):
@@ -130,6 +154,7 @@ class Settings(_Base):
     trends: TrendsConfig = Field(default_factory=TrendsConfig)
     humor: HumorConfig = Field(default_factory=HumorConfig)
     learning: LearningConfig = Field(default_factory=LearningConfig)
+    safety: SafetyConfig = Field(default_factory=SafetyConfig)
 
     def enabled_platforms(self) -> list[str]:
         return [name for name, p in self.platforms.items() if p.enabled]

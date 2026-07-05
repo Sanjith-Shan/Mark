@@ -31,7 +31,7 @@ platforms:
   x:
     enabled: true
     max_posts_per_day: 5               # 3-5 originals/day is the growth cadence
-    content_types: ["image", "text", "thread", "video"]
+    content_types: ["image", "text", "video"]
     optimal_times: ["09:00", "11:30", "14:00", "16:30", "19:00"]
     hashtag_count: 0                   # hashtags read as spam on X in 2026
   linkedin:
@@ -103,5 +103,24 @@ trends:
     - college
 
 approval:
-  auto_approve: false                    # Set true once you trust the output
+  auto_approve: false
+  mode: graduated        # autonomy is earned: QA bar + per-strategy track record
+  min_track_record: 5
+  qa_bar: 6.5                    # Set true once you trust the output
   auto_approve_types: []                 # Content types to auto-approve, e.g. ["text"]
+
+# --- Evolution machinery (see src/mark/learning/) -------------------------- #
+learning:
+  decay_half_life_days: 45      # evidence half-life; lets the system adapt to shifts
+  holdout_pct: 0.10             # slice of generations using a random policy — the
+                                # permanent control group proving learning lifts
+  reward_maturity_hours: 48     # a post is credited once, after metrics stabilize
+  min_baseline_posts: 3         # posts a platform needs before rewards flow
+  strategy_prior_strength: 4.0  # research mix-weights as pseudo-observations
+
+# --- Self-monitoring (safe unattended operation) ---------------------------- #
+safety:
+  collapse_window: 5            # trailing rewarded posts examined per platform
+  collapse_threshold: 0.28      # avg graded reward below this = collapse → pause
+  pause_hours: 48               # platform cool-down after a collapse
+  max_daily_spend_usd: 25.0     # freeze generation past this (real spend only)

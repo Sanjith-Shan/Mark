@@ -705,6 +705,16 @@ def episode_number(app: App, product: dict, platform: str, strategy: Strategy) -
     plus one. Counting dead drafts would desync numbering from the on-air lore."""
     if not strategy.series_format:
         return 1
+    # First-class series bookkeeping (series.py): when an active series row
+    # exists, its episode counter is the source of truth for numbering.
+    srow = db_module.query_one(
+        app.conn,
+        "SELECT episodes FROM series WHERE product_id = ? AND strategy_id = ? "
+        "AND status = 'active' ORDER BY created_at DESC LIMIT 1",
+        (product["id"], strategy.id),
+    )
+    if srow is not None:
+        return int(srow["episodes"] or 0) + 1
     row = db_module.query_one(
         app.conn,
         "SELECT COUNT(*) AS n FROM content WHERE product_id = ? "

@@ -37,8 +37,10 @@ def write_content(
     episode: int = 1,
     character: Optional[dict] = None,
     bandit_picks: Optional[dict] = None,
+    qa_out: Optional[dict] = None,
 ) -> ContentDraft:
     winner_examples = winner_examples or []
+    qa_out = qa_out if qa_out is not None else {}
     system = prompts.writer_system(product, platform, plan, winner_examples,
                                    strategy=strategy, episode=episode, character=character)
     user = prompts.writer_user(plan)
@@ -59,10 +61,19 @@ def write_content(
         )
         drafts.append(d)
 
-    draft = drafts[0] if len(drafts) == 1 else _judge(app, llm, product, platform, drafts, content_id)
+    if len(drafts) == 1:
+        draft = drafts[0]
+    else:
+        draft, verdict = _judge(app, llm, product, platform, drafts, content_id)
+        # QA evidence persists on the content row — graduated autonomy reads it.
+        qa_out.update({"hook_strength": verdict.hook_strength,
+                       "brand_fit": verdict.brand_fit,
+                       "scroll_stopping": verdict.scroll_stopping,
+                       "slop_violations": len(verdict.slop_violations or [])})
 
     if app.settings.llm.self_critique:
-        draft = _critique(app, llm, product, platform, draft, content_id)
+        draft, critique = _critique(app, llm, product, platform, draft, content_id)
+        qa_out["critique_problems"] = len(critique.problems or [])
 
     # Humor engine: strategies opt in via humor_level; a bare "funny" tone from
     # the strategist gets the light pass so tone-funny content is actually funny.
@@ -74,7 +85,8 @@ def write_content(
 
         draft = humor.punch_up(app, llm, product, platform, plan, draft,
                                level=humor_level, bandit_picks=bandit_picks,
-                               character=character, content_id=content_id)
+                               character=character, content_id=content_id,
+                               qa_out=qa_out)
 
     return _finalize(draft, app, platform, plan)
 
@@ -83,7 +95,7 @@ def write_content(
 # Variant judging
 # --------------------------------------------------------------------------- #
 def _judge(app: App, llm: LLM, product: dict, platform: str, drafts: list[ContentDraft],
-           content_id) -> ContentDraft:
+           content_id) -> tuple[ContentDraft, JudgeVerdict]:
     verdict = llm.parse(
         prompts.judge_system(product, platform),
         prompts.judge_user(drafts),
@@ -94,7 +106,7 @@ def _judge(app: App, llm: LLM, product: dict, platform: str, drafts: list[Conten
         mock_factory=lambda: _mock_verdict(drafts),
     )
     idx = verdict.best_index if 0 <= verdict.best_index < len(drafts) else 0
-    return drafts[idx]
+    return drafts[idx], verdict
 
 
 def _mock_verdict(drafts: list[ContentDraft]) -> JudgeVerdict:
@@ -111,7 +123,7 @@ def _mock_verdict(drafts: list[ContentDraft]) -> JudgeVerdict:
 # Self-critique
 # --------------------------------------------------------------------------- #
 def _critique(app: App, llm: LLM, product: dict, platform: str, draft: ContentDraft,
-              content_id) -> ContentDraft:
+              content_id) -> tuple[ContentDraft, CritiqueResult]:
     result = llm.parse(
         prompts.critique_system(product, platform),
         prompts.critique_user(draft),
@@ -126,7 +138,7 @@ def _critique(app: App, llm: LLM, product: dict, platform: str, draft: ContentDr
             draft.caption = result.revised_caption
         if result.revised_hook:
             draft.hook = result.revised_hook
-    return draft
+    return draft, result
 
 
 def _mock_critique(draft: ContentDraft) -> CritiqueResult:

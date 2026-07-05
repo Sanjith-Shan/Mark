@@ -28,8 +28,34 @@ ANTI_SLOP = (
     "slay, bussin, delulu, skibidi, sigma, \"it's giving\"). "
     "Be specific and concrete, never vague and generic. Write like a real "
     "person texting a friend, not a brand. Hooks must be under 10 words and create "
-    "curiosity or emotion. Mention the product naturally — never forced."
+    "curiosity or emotion."
 )
+
+
+def is_entertainment(product: dict) -> bool:
+    return (product.get("kind") or "product") == "entertainment"
+
+
+def product_block(product: dict) -> str:
+    """The campaign identity section. Two modes:
+
+    product        — classic marketing: a product exists and content serves it.
+    entertainment  — content-as-the-business: the account IS the product; the
+                     only goal is that people watch, laugh, share, and follow.
+    """
+    if is_entertainment(product):
+        return f"""THE ACCOUNT: {product['name']} — a pure content account. There is NO product
+to market and NO call-to-action to land: the content itself is the business.
+Success = watch time, shares, follows, and comments. Never invent a product,
+never pitch anything — entertain, full stop.
+ACCOUNT PREMISE: {product['description']}
+TARGET AUDIENCE: {product['target_audience']}
+VOICE: {product['brand_voice']}"""
+    return f"""PRODUCT: {product['name']} — {product['description']}
+BRAND VOICE: {product['brand_voice']}
+TARGET AUDIENCE: {product['target_audience']}
+WEBSITE: {product.get('website_url') or '(none)'}
+Mention the product naturally — never forced."""
 
 # The ten commandments (docs/research/MASTER-STRATEGY.md Appendix B) — printed
 # above every writer prompt.
@@ -253,12 +279,13 @@ def strategist_system(product: dict, platform: str, trends: list[dict],
                   "product angle would ruin the joke, let the trend carry and keep the "
                   "product to the caption."
                   + (f"\nHOW CREATORS ARE EXECUTING IT: {style}" if style else ""))
+    from . import rating as rating_mod
+
     return f"""You are a world-class social media strategist for {product['name']}.
 {strat}{strat_brief}{knowledge}{mined}{forced}
 
-PRODUCT: {product['description']}
-TARGET AUDIENCE: {product['target_audience']}
-BRAND VOICE: {product['brand_voice']}
+{product_block(product)}
+{rating_mod.guidance_block(product, platform)}
 PLATFORM: {platform}
 ALLOWED CONTENT TYPES (choose one of these): {', '.join(allowed_types)}
 
@@ -307,15 +334,15 @@ def writer_system(product: dict, platform: str, plan, winner_examples: list[dict
     knowledge = knowledge_block(product, strategy)
     char = character_block(character)
     emotion = plan.emotional_target or "recognition"
+    from . import rating as rating_mod
+
     return f"""You are an elite copywriter creating a {plan.content_type} for {platform}.
 
 {COMMANDMENTS}
 {strat}{strat_brief}{media_brief}{examples}{knowledge}{char}
 
-PRODUCT: {product['name']} — {product['description']}
-BRAND VOICE: {product['brand_voice']}
-TARGET AUDIENCE: {product['target_audience']}
-WEBSITE: {product.get('website_url') or '(none)'}
+{product_block(product)}
+{rating_mod.guidance_block(product, platform)}
 
 CONTENT PLAN:
 - Topic: {plan.topic}
@@ -428,14 +455,19 @@ MECHANISM_RECIPES = {
 
 
 def violation_search_system(product: dict, platform: str, specificity_bank: list[str]) -> str:
+    from . import rating as rating_mod
+
     bank = "\n".join(f"- {s}" for s in specificity_bank[:8]) if specificity_bank else "(none yet)"
     return f"""You are a comedy writer mining for material for {product['name']} on {platform}.
 
 AUDIENCE: {product['target_audience']}
+{rating_mod.guidance_block(product, platform)}
 
 THE THEORY (benign violation): a laugh needs something simultaneously WRONG (violates
 how the world ought to be) and SAFE (harmless for this audience). Too safe = boring.
-Too wrong = offensive. Funny lives on the ridge between.
+Too wrong = offensive. Funny lives on the ridge between — and where that ridge sits
+depends on the rating above: at EDGY, material that stings is in-bounds; at CLEAN,
+it isn't. Score benignness relative to the rating, not to a generic brand-safety bar.
 
 RAW MATERIAL — real artifacts of this audience's life (use these, add your own):
 {bank}
@@ -456,12 +488,15 @@ def violation_search_user(topic: str, angle: str) -> str:
 def humor_fanout_system(product: dict, platform: str, plan, violation,
                         personas: list[str], mechanism: str,
                         specificity_bank: list[str], character: Optional[dict] = None) -> str:
+    from . import rating as rating_mod
+
     persona_lines = "\n".join(f"- {p}: {PERSONA_VOICES.get(p, p)}" for p in personas)
     recipe = MECHANISM_RECIPES.get(mechanism, "")
     bank = "\n".join(f"- {s}" for s in specificity_bank[:6]) if specificity_bank else "(none)"
     char = character_block(character)
     return f"""You are a punch-up room writing {plan.content_type} comedy for {product['name']} on {platform}.
 {char}
+{rating_mod.guidance_block(product, platform)}
 THE VIOLATION TO BUILD ON (this is the joke's engine):
 "{violation.violation}" (punches at: {violation.target})
 
@@ -493,8 +528,14 @@ def humor_fanout_user(plan, draft) -> str:
 
 
 def pairwise_judge_system(product: dict, platform: str, calibration: str = "") -> str:
+    from . import rating as rating_mod
+
     return f"""You judge which of two comedy drafts is FUNNIER for {product['name']} on {platform}.
 Audience: {product['target_audience']}
+{rating_mod.guidance_block(product, platform)}
+Score benignness RELATIVE to that rating: at EDGY, dark/spiky material that would
+fail a corporate-safety bar is fine (only the hard lines matter); at CLEAN the bar
+is strict. Never reward punching down at any rating.
 {calibration}
 
 Compare PAIRWISE (never absolute scores). The funnier draft is the one with:

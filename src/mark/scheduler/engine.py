@@ -50,45 +50,72 @@ def _all_products(app: App) -> list[dict]:
 # Jobs
 # --------------------------------------------------------------------------- #
 def job_generate(app: App, llm: LLM) -> None:
-    from .. import pipeline
+    from .. import monitor, pipeline
 
+    if monitor.generation_frozen(app):
+        log.warning("generation frozen (daily spend cap) — skipping")
+        return
     for product in _active_products(app):
         cadence = db_module.loads(product["posting_cadence"], {}) or {}
         platforms = [p for p in pipeline.product_platforms(product)
                      if app.settings.platform(p).enabled]
         for platform in platforms:
-            count = max(1, int(cadence.get(platform, 1)))
+            count = int(cadence.get(platform, 1))
+            if count <= 0:
+                continue  # cadence 0 = platform deliberately quiet
+            if monitor.is_paused(app, product["id"], platform):
+                continue  # collapse cool-down: don't stack drafts either
+            # Backlog guard: generating faster than posting just queues stale
+            # content. Skip when the unposted pile is already 3 days of cadence.
+            row = db_module.query_one(
+                app.conn,
+                "SELECT COUNT(*) AS n FROM content WHERE product_id = ? AND platform = ? "
+                "AND status IN ('draft', 'approved')", (product["id"], platform))
+            if row and row["n"] >= max(3, count * 3):
+                log.info("backlog guard: %s/%s has %s unposted items — skipping",
+                         product["id"], platform, row["n"])
+                continue
             _safe(pipeline.generate_all, app, llm, product, [platform], count)
         log.info("generated drafts for %s", product["id"])
 
 
 def job_post_platform(app: App, platform: str) -> None:
+    from .. import monitor
     from ..posting import manager
 
-    cap = app.settings.platform(platform).max_posts_per_day
-    if _posts_today(app, platform) >= cap:
-        return
-    # Rotate across running campaigns fairly: pick the campaign that has posted
-    # least recently on this platform, oldest approved draft first.
+    # Fair rotation across campaigns: order candidates by how recently their
+    # campaign last posted on this platform (never-posted first), then oldest
+    # draft first. Caps and pauses are evaluated PER CANDIDATE because each
+    # campaign may post through its own account (multi-account test lab).
     # scheduled_at IS NULL: user-scheduled content belongs exclusively to
     # job_post_scheduled — otherwise it would post early at the next optimal
     # slot (and could double-post via a race between the two jobs).
-    row = db_module.query_one(
+    rows = db_module.query(
         app.conn,
-        "SELECT c.* FROM content c JOIN products pr ON pr.id = c.product_id "
+        "SELECT c.*, (SELECT MAX(p2.posted_at) FROM posts p2 "
+        "  JOIN content c2 ON c2.id = p2.content_id "
+        "  WHERE c2.product_id = c.product_id AND p2.platform = c.platform) AS last_post "
+        "FROM content c JOIN products pr ON pr.id = c.product_id "
         "WHERE c.status = 'approved' AND c.platform = ? "
         "AND c.scheduled_at IS NULL "
         "AND (c.expires_at IS NULL OR c.expires_at > datetime('now')) "
         "AND pr.active = 1 AND COALESCE(pr.archived, 0) = 0 "
-        "ORDER BY c.created_at ASC LIMIT 1", (platform,))
-    if not row:
+        "ORDER BY COALESCE(last_post, '') ASC, c.created_at ASC LIMIT 20", (platform,))
+    cap = app.settings.platform(platform).max_posts_per_day
+    for row in rows:
+        if monitor.is_paused(app, row["product_id"], platform):
+            continue
+        if manager.posts_today(app, platform, product_id=row["product_id"]) >= cap:
+            continue
+        manager.post_content(app, dict(row))
+        log.info("posted content %s to %s", row["id"], platform)
         return
-    manager.post_content(app, dict(row))
-    log.info("posted content %s to %s", row["id"], platform)
 
 
 def job_collect_analytics(app: App, llm: Optional[LLM] = None) -> None:
+    from .. import monitor
     from ..analytics import collector
+    from ..learning import feedback
 
     for product in _all_products(app):
         _safe(collector.collect, app, product["id"])
@@ -99,6 +126,12 @@ def job_collect_analytics(app: App, llm: Optional[LLM] = None) -> None:
 
         for product in _active_products(app):
             _safe(replies.draft_replies, app, llm, product)
+    # Rewards are idempotent (each post credited exactly once at maturity), so
+    # the bandit learns every few hours instead of waiting for the weekly pass.
+    for product in _active_products(app):
+        _safe(feedback.apply_rewards, app, product["id"])
+        _safe(monitor.check_engagement_collapse, app, product)
+    _safe(monitor.check_spend, app)
     log.info("collected analytics")
 
 
@@ -131,20 +164,23 @@ def job_trends_fast(app: App, llm: LLM) -> None:
 
 def job_post_scheduled(app: App) -> None:
     """Post approved content whose explicit `scheduled_at` time has arrived.
-    User-scheduled items bypass optimal-time slots but still respect daily caps."""
+    User-scheduled items bypass optimal-time slots but still respect daily caps.
+    scheduled_at may arrive as ISO ('2026-07-05T14:00') — normalize the 'T' so
+    the lexicographic comparison against datetime('now') is valid."""
     from ..posting import manager
 
     rows = db_module.query(
         app.conn,
         "SELECT c.* FROM content c JOIN products pr ON pr.id = c.product_id "
         "WHERE c.status = 'approved' AND c.scheduled_at IS NOT NULL "
-        "AND c.scheduled_at <= datetime('now') "
+        "AND replace(c.scheduled_at, 'T', ' ') <= datetime('now') "
         "AND (c.expires_at IS NULL OR c.expires_at > datetime('now')) "
         "AND pr.active = 1 AND COALESCE(pr.archived, 0) = 0 "
         "ORDER BY c.scheduled_at ASC")
     for row in rows:
         platform = row["platform"]
-        if _posts_today(app, platform) >= app.settings.platform(platform).max_posts_per_day:
+        if manager.posts_today(app, platform, product_id=row["product_id"]) \
+                >= app.settings.platform(platform).max_posts_per_day:
             continue
         _safe(manager.post_content, app, dict(row))
         log.info("posted scheduled content %s to %s", row["id"], platform)
@@ -219,14 +255,6 @@ def job_feedback(app: App, llm: LLM) -> None:
     for product in _active_products(app):
         _safe(feedback.run, app, llm, product)
     log.info("ran feedback loop")
-
-
-def _posts_today(app: App, platform: str) -> int:
-    row = db_module.query_one(
-        app.conn,
-        "SELECT COUNT(*) AS n FROM posts WHERE platform = ? "
-        "AND date(posted_at, 'localtime') = date('now', 'localtime')", (platform,))
-    return row["n"] if row else 0
 
 
 # --------------------------------------------------------------------------- #

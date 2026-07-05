@@ -220,20 +220,24 @@ def generate_one(app: App, llm: LLM, product: dict, platform: str,
 
     examples = winner_examples(app, llm, product, platform, plan)
     feedback = recent_rejection_feedback(app, product, platform)
+    qa: dict = {}
     draft = writer.write_content(app, llm, product, platform, plan,
                                  winner_examples=examples, user_feedback=feedback,
                                  strategy=strategy, episode=episode, character=character,
-                                 bandit_picks=ctx["bandit_picks"])
+                                 bandit_picks=ctx["bandit_picks"], qa_out=qa)
 
     # Novelty guard — one regeneration attempt with a "make it different" nudge.
     novelty = check_novelty(app, llm, product, platform, draft)
     if not novelty.ok:
+        qa = {}
         draft = writer.write_content(app, llm, product, platform, plan,
                                      winner_examples=examples, user_feedback=feedback,
                                      novelty_similar=novelty.similar_caption,
                                      strategy=strategy, episode=episode, character=character,
-                                     bandit_picks=ctx["bandit_picks"])
+                                     bandit_picks=ctx["bandit_picks"], qa_out=qa)
         novelty = check_novelty(app, llm, product, platform, draft)
+    qa["novelty_max_sim"] = round(novelty.max_sim, 4)
+    qa["novelty_ok"] = novelty.ok
 
     strategy_context = {
         "topic": plan.topic, "angle": plan.angle, "hook_style": plan.hook_style,
@@ -260,7 +264,7 @@ def generate_one(app: App, llm: LLM, product: dict, platform: str,
         product_id=product["id"], platform=platform, content_type=plan.content_type,
         caption=draft.caption, hashtags=draft.hashtags, hook=draft.hook,
         media_paths=[], media_urls=[], strategy_context=strategy_context, status="draft",
-        draft=draft.model_dump(),
+        draft=draft.model_dump(), qa=qa,
     )
 
     # Media generation with the spec-mandated fallback (video fails → try image).
@@ -277,8 +281,13 @@ def generate_one(app: App, llm: LLM, product: dict, platform: str,
     db_module.log_activity(app.conn, "generate",
                            f"Drafted {plan.content_type} for {platform}: “{draft.hook}”",
                            product_id=product["id"], content_id=content_id)
-    if not (strategy and strategy.never_auto_approve):
-        _maybe_auto_approve(app, content_id, plan.content_type)
+    # A draft that is STILL a near-duplicate after the regeneration attempt may
+    # never self-approve — a human decides, or it dies in the queue.
+    if novelty.ok:
+        from . import autonomy
+
+        autonomy.maybe_auto_approve(app, product, content_id, platform,
+                                    plan.content_type, strategy=strategy, qa=qa)
     return store.get_content(app.conn, content_id)
 
 
@@ -443,25 +452,40 @@ def adapt_content(app: App, llm: LLM, source_content_id: int,
         app.conn, "cascade",
         f"Cascaded winner #{source_content_id} ({source['platform']}) → {target_platform}",
         product_id=product["id"], content_id=content_id, level="success")
-    if not (strategy and strategy.never_auto_approve):
-        _maybe_auto_approve(app, content_id, plan.content_type)
+    if novelty.ok:
+        from . import autonomy
+
+        autonomy.maybe_auto_approve(app, product, content_id, target_platform,
+                                    plan.content_type, strategy=strategy,
+                                    qa={"humor_applied": bool(draft.humor_mechanism)})
     return store.get_content(app.conn, content_id)
 
 
 def _produce_media_with_fallback(app, llm, product, content_id, plan, draft,
                                  character: Optional[dict] = None, strategy=None) -> dict:
+    from . import db as db_module
+
     try:
         return media_orch.produce_media(app, llm, product, content_id, plan, draft,
                                         character=character, strategy=strategy)
     except Exception as exc:  # noqa: BLE001
+        # Every degradation is recorded: a media-less image post or a video
+        # that silently became a still must be visible in the queue AND to the
+        # learning loop (engagement attribution is meaningless otherwise).
+        db_module.log_activity(app.conn, "media",
+                               f"Media generation failed for #{content_id}: {exc}",
+                               product_id=product["id"], content_id=content_id,
+                               level="error")
         if plan.content_type in ("image", "text", "thread"):
             # Nothing simpler to fall back to.
+            store.update_content(app.conn, content_id, error=f"media failed: {exc}")
             return {"media_paths": [], "media_urls": []}
         # Fall back to a single image.
         from .agents.media import media_dir_for
         from .media import images
 
         try:
+            original_type = plan.content_type
             plan.content_type = "image"
             if not draft.image_prompt:
                 draft.image_prompt = f"{plan.topic} — social visual"
@@ -470,15 +494,15 @@ def _produce_media_with_fallback(app, llm, product, content_id, plan, draft,
             path = out_dir / f"{content_id}_{plan.platform}_image.png"
             images.generate_image(app, llm, draft.image_prompt, path, size=size,
                                   content_id=content_id, product_id=product["id"])
+            store.update_content(app.conn, content_id,
+                                 error=f"degraded {original_type}→image: {exc}")
             return {"media_paths": [str(path)], "media_urls": []}
-        except Exception:
+        except Exception as exc2:
+            store.update_content(app.conn, content_id,
+                                 error=f"media failed entirely: {exc2}")
             return {"media_paths": [], "media_urls": []}
 
 
-def _maybe_auto_approve(app: App, content_id: int, content_type: str) -> None:
-    cfg = app.settings.approval
-    if cfg.auto_approve or content_type in (cfg.auto_approve_types or []):
-        store.set_content_status(app.conn, content_id, "approved", approved_at=_now())
 
 
 def generate_all(app: App, llm: LLM, product: dict,

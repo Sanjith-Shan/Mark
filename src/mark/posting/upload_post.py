@@ -29,10 +29,12 @@ def _ext_platform(p: str) -> str:
 
 
 class UploadPostClient:
-    def __init__(self, app: App):
+    def __init__(self, app: App, profile: Optional[str] = None):
         self.app = app
         self.key = app.keys.upload_post
-        self.user = app.settings.upload_post.profile_username
+        # Per-campaign profile override (multi-account test lab): each campaign
+        # can post through its own upload-post profile / connected accounts.
+        self.user = profile or app.settings.upload_post.profile_username
 
     @property
     def mock(self) -> bool:
@@ -54,8 +56,8 @@ class UploadPostClient:
             data["privacy_level"] = level
             data["tiktokPrivacyLevel"] = level
         data.update(_platform_params(platforms, extra))
-        files = {"video": (Path(video_path).name, open(video_path, "rb"))}
-        return self._post("/upload", data, platforms, files=files)
+        return self._post("/upload", data, platforms,
+                          file_specs={"video": video_path})
 
     def upload_photo(self, photo_paths: list[str], title: str, platforms: list[str],
                      *, first_comment: Optional[str] = None, **extra) -> dict:
@@ -65,8 +67,8 @@ class UploadPostClient:
         if first_comment:
             data["first_comment"] = first_comment
         data.update(_platform_params(platforms, extra))
-        files = [("photos[]", (Path(p).name, open(p, "rb"))) for p in photo_paths]
-        return self._post("/upload_photos", data, platforms, files=files)
+        return self._post("/upload_photos", data, platforms,
+                          file_specs=[("photos[]", p) for p in photo_paths])
 
     def upload_text(self, text: str, platforms: list[str],
                     *, first_comment: Optional[str] = None, **extra) -> dict:
@@ -119,7 +121,8 @@ class UploadPostClient:
     def _headers(self) -> dict:
         return {"Authorization": f"Apikey {self.key}"}
 
-    def _post(self, path: str, data: dict, platforms: list[str], files=None) -> dict:
+    def _post(self, path: str, data: dict, platforms: list[str],
+              file_specs=None) -> dict:
         import httpx
 
         # upload-post expects repeated platform[] fields; httpx expands a list
@@ -128,16 +131,20 @@ class UploadPostClient:
         form = {**data, "platform[]": [_ext_platform(p) for p in platforms]}
 
         def _call():
-            with httpx.Client(timeout=120) as client:
-                resp = client.post(BASE_URL + path, headers=self._headers(),
-                                   data=form, files=files)
-                resp.raise_for_status()
-                return resp.json()
+            # Files are (re)opened per attempt: reusing handles across retries
+            # sends exhausted streams — a transient error would turn into a
+            # zero-byte upload (or a duplicate post with empty media).
+            files = _open_files(file_specs)
+            try:
+                with httpx.Client(timeout=120) as client:
+                    resp = client.post(BASE_URL + path, headers=self._headers(),
+                                       data=form, files=files)
+                    resp.raise_for_status()
+                    return resp.json()
+            finally:
+                _close_files(files)
 
-        try:
-            raw = _retry(_call)
-        finally:
-            _close_files(files)
+        raw = _retry(_call)
         log_external_cost(self.app, "upload_post", "post", path, units=len(platforms))
         return _normalize(raw, platforms)
 
@@ -176,6 +183,14 @@ def _platform_params(platforms: list[str], extra: dict) -> dict:
     if "pinterest" in platforms and extra.get("pinterest_board_id"):
         out["pinterest_board_id"] = extra["pinterest_board_id"]
     return out
+
+
+def _open_files(file_specs):
+    """{"field": path} or [(field, path), ...] → httpx files argument."""
+    if not file_specs:
+        return None
+    items = file_specs.items() if isinstance(file_specs, dict) else file_specs
+    return [(field, (Path(p).name, open(p, "rb"))) for field, p in items]
 
 
 def _close_files(files) -> None:

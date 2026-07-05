@@ -100,8 +100,14 @@ class LLM:
             output_tokens=getattr(usage, "completion_tokens", 0) or 0,
         )
         parsed = completion.choices[0].message.parsed
-        if parsed is None:  # refusal or empty — fall back to a safe empty object
-            return mock_factory() if mock_factory else _empty_instance(schema)
+        if parsed is None:
+            # Refusal/empty on the LIVE path must be loud, not silently swapped
+            # for offline mock content — mock copy posted to a real audience is
+            # the worst possible failure mode. Callers' error handling (or the
+            # scheduler's job wrapper) decides what happens next.
+            refusal = getattr(completion.choices[0].message, "refusal", None)
+            raise RuntimeError(f"model returned no parsable output for {schema.__name__}"
+                               + (f" (refusal: {refusal})" if refusal else ""))
         return parsed
 
     # -- free-form text --------------------------------------------------- #

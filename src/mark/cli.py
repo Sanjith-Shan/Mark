@@ -772,5 +772,166 @@ def _write_product_yaml(path: Path, p: ProductConfig) -> None:
     path.write_text(yaml.safe_dump(p.model_dump(exclude_none=True), sort_keys=False))
 
 
+# --------------------------------------------------------------------------- #
+# onboard — point Mark at a new product / entertainment theme
+# --------------------------------------------------------------------------- #
+@app.command()
+def onboard(
+    ctx: typer.Context,
+    description: str = typer.Argument(..., help="What the product / entertainment theme is."),
+    name: Optional[str] = typer.Option(None, "--name", help="Campaign display name."),
+    kind: Optional[str] = typer.Option(None, "--kind",
+                                       help="product | entertainment (default: inferred)."),
+    url: Optional[str] = typer.Option(None, "--url", help="Website URL."),
+    platforms: Optional[str] = typer.Option(None, "--platforms",
+                                            help="Comma-separated, e.g. tiktok,x."),
+):
+    """Onboard a brand-new campaign: research + generate the full config automatically."""
+    from . import onboard as onboard_mod
+    from .llm import LLM
+
+    a = _app(ctx)
+    if kind and kind not in ("product", "entertainment"):
+        console.print("[red]--kind must be 'product' or 'entertainment'.[/]")
+        raise typer.Exit(code=1)
+    plats = [p.strip() for p in platforms.split(",") if p.strip()] if platforms else None
+    with console.status("[bold]Researching the campaign…[/]"):
+        out = onboard_mod.onboard_campaign(a, LLM(a), description, name=name, kind=kind,
+                                           website_url=url, platforms=plats)
+    prod = out["product"]
+    char = out.get("character") or {}
+    console.print(Panel.fit(
+        f"[bold green]Campaign onboarded:[/] [bold]{prod['id']}[/] ({prod['name']})\n"
+        f"kind:       {prod.get('kind')}\n"
+        f"rating:     {prod.get('content_rating')}\n"
+        f"platforms:  {', '.join(db_module.loads(prod['platforms'], []))}\n"
+        f"character:  {char.get('name', '—')}\n"
+        f"briefs:     {out['briefs_adapted']} strategy brief(s) adapted\n"
+        f"yaml:       {out['yaml_path']}",
+        title="onboard",
+    ))
+    console.print("Review/edit the YAML, then: [bold]mark strategies[/] · "
+                  "[bold]mark generate[/]")
+
+
+# --------------------------------------------------------------------------- #
+# series — franchise bookkeeping
+# --------------------------------------------------------------------------- #
+@app.command("series")
+def series_cmd(ctx: typer.Context,
+               product: Optional[str] = typer.Option(None, "--product", "-p")):
+    """Show the product's series (franchises): premise, episodes, rewards, status."""
+    from . import series as series_mod
+
+    a = _app(ctx)
+    prod = _resolve_product_or_exit(a, product)
+    rows = series_mod.list_series(a, prod["id"])
+    if not rows:
+        console.print("[yellow]No series yet.[/] Episodic strategies create one "
+                      "automatically as they generate.")
+        raise typer.Exit()
+    table = Table(title=f"Series — {prod['name']}")
+    for col in ("id", "strategy", "premise", "episodes", "avg reward", "status"):
+        table.add_column(col, justify="right" if col in ("id", "episodes") else "left")
+    for s in rows:
+        status = "[green]active[/]" if s["status"] == "active" else \
+            f"[red]retired[/] [dim]{(s.get('retired_reason') or '')[:36]}[/]"
+        table.add_row(str(s["id"]), s["strategy_id"], (s["premise"] or "")[:56],
+                      str(s["episodes"]),
+                      f"{s['avg_engagement']:.3f}" if s["avg_engagement"] else "—",
+                      status)
+    console.print(table)
+
+
+# --------------------------------------------------------------------------- #
+# knowledge-refresh — mine fresh audience language from collected data
+# --------------------------------------------------------------------------- #
+@app.command("knowledge-refresh")
+def knowledge_refresh(ctx: typer.Context,
+                      product: Optional[str] = typer.Option(None, "--product", "-p")):
+    """Refresh the specificity bank + pain veins from real comments and trends."""
+    from .learning import knowledge
+    from .llm import LLM
+
+    a = _app(ctx)
+    prod = _resolve_product_or_exit(a, product)
+    with console.status("[bold]Mining audience language…[/]"):
+        out = knowledge.mine(a, LLM(a), prod)
+    applied = out["applied"]
+    body = (f"mined:      {out['comments_mined']} comment(s), "
+            f"{out['trends_mined']} trend topic(s)\n"
+            f"bank:       {len(out['specificity_bank'])} entries · "
+            f"pain veins: {len(out['pain_veins'])}\n")
+    for label, items in (("added (bank)", applied["specificity_added"]),
+                         ("added (pains)", applied["pain_veins_added"]),
+                         ("retired", applied["retired"])):
+        if items:
+            body += f"\n[bold]{label}:[/]\n" + "\n".join(f"  • {i}" for i in items)
+    if not (applied["specificity_added"] or applied["pain_veins_added"] or applied["retired"]):
+        body += "\n[dim]No changes proposed — pools are current.[/]"
+    console.print(Panel(body, title=f"knowledge refresh — {prod['id']}"))
+
+
+# --------------------------------------------------------------------------- #
+# evolve-proof — run the closed-loop learning proof
+# --------------------------------------------------------------------------- #
+@app.command("evolve-proof")
+def evolve_proof(
+    ctx: typer.Context,
+    cycles: int = typer.Option(140, "--cycles"),
+    shift_at: int = typer.Option(70, "--shift-at",
+                                 help="Cycle where the planted taste inverts (0 = never)."),
+    posts_per_cycle: int = typer.Option(3, "--posts-per-cycle"),
+    holdout: float = typer.Option(0.2, "--holdout"),
+    seed: int = typer.Option(7, "--seed"),
+):
+    """Prove the learning loop converges, lifts, and adapts (offline simulation)."""
+    import json
+    import time
+
+    from .simulate import PLANTED_TASTE, WATCH_ARM, run_proof
+
+    arm_type, best, worst = WATCH_ARM
+    console.print(f"[bold]Planted taste:[/] {json.dumps(PLANTED_TASTE)}")
+    console.print(f"Watching arm '{arm_type}': best={best!r}, post-shift best={worst!r}\n")
+    shift = shift_at if shift_at > 0 else None
+    t0 = time.time()
+
+    def on_cycle(cycle: int, share: float) -> None:
+        if cycle % 10 == 0:
+            bar = "#" * int(share * 40)
+            console.print(f"  cycle {cycle:>4}  best-arm share {share:0.2f}  {bar}")
+
+    r = run_proof(cycles=cycles, shift_at=shift, holdout_pct=holdout,
+                  posts_per_cycle=posts_per_cycle, seed=seed, on_cycle=on_cycle)
+    dt = time.time() - t0
+
+    console.print(f"\n[bold]=== EVOLUTION PROOF ({cycles} cycles in {dt:.1f}s) ===[/]")
+    console.print(json.dumps(r.summary(), indent=2))
+
+    # Verdict logic mirrors scripts/evolution_proof.py (simulate.py only measures;
+    # the caller judges — replicated here rather than shared, by design).
+    ok = True
+    chance = 1.0 / 6.0
+    checks = [
+        ("convergence (pre-shift best-arm share ≥ 2x chance)",
+         r.converged_share_pre_shift >= chance * 2),
+        ("lift (bandit beats random holdout)",
+         bool(r.lift and r.lift["lift_pct"] > 0)),
+        ("adaptation (post-shift new-best share ≥ 2x chance)",
+         shift is None or r.converged_share_end >= chance * 2),
+    ]
+    for check_name, passed in checks:
+        style = "green" if passed else "red"
+        console.print(f"  [{style}]{'PASS' if passed else 'FAIL'}[/{style}] {check_name}")
+        ok = ok and passed
+    if ok:
+        console.print("\n[bold green]VERDICT:[/] the learning loop demonstrably "
+                      "converges, lifts, and adapts.")
+    else:
+        console.print("\n[bold red]VERDICT: FAILED[/] — see numbers above.")
+    raise typer.Exit(code=0 if ok else 1)
+
+
 if __name__ == "__main__":
     app()

@@ -43,8 +43,11 @@ def upsert_product(conn: sqlite3.Connection, p: ProductConfig, active: bool = Tr
          db_module._encode(p.knowledge) if p.knowledge else None,
          1 if active else 0),
     )
+    # Note: importing/adding a campaign never deactivates the others — multiple
+    # campaigns run concurrently. Exclusive activation is `set_active_product`
+    # (the CLI `product activate` command), used deliberately.
     if active:
-        set_active_product(conn, p.id)
+        db_module.execute(conn, "UPDATE products SET active = 1 WHERE id = ?", (p.id,))
     return p.id
 
 
