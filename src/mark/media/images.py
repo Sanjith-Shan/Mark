@@ -8,6 +8,8 @@ pipeline (carousel assembly, posting previews) works unchanged.
 from __future__ import annotations
 
 import base64
+import hashlib
+import re
 import textwrap
 from pathlib import Path
 from typing import Optional
@@ -127,7 +129,7 @@ def add_text_overlay(image_path: Path, text: str, out_path: Optional[Path] = Non
     """Draw bold, outlined text on an existing image (for carousel slides)."""
     image_path = Path(image_path)
     out_path = Path(out_path) if out_path else image_path
-    img = Image.open(image_path).convert("RGB")
+    img = Image.open(image_path).convert("RGBA")
     draw = ImageDraw.Draw(img)
     w, h = img.size
     font = _load_font(int(h * 0.06))
@@ -138,11 +140,17 @@ def add_text_overlay(image_path: Path, text: str, out_path: Optional[Path] = Non
     x = (w - tw) / 2
     y = {"center": (h - th) / 2, "top": h * 0.08, "bottom": h * 0.80}.get(position, (h - th) / 2)
 
-    # Darkened band behind text for legibility.
+    # Semi-transparent darkened band behind text for legibility. Drawn on its
+    # own RGBA layer and alpha-composited — drawing straight onto an RGB image
+    # ignores the alpha channel and comes out fully opaque.
     pad = int(h * 0.02)
-    draw.rectangle([x - pad, y - pad, x + tw + pad, y + th + pad], fill=(0, 0, 0, 180))
+    band = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    ImageDraw.Draw(band).rectangle([x - pad, y - pad, x + tw + pad, y + th + pad],
+                                   fill=(0, 0, 0, 180))
+    img = Image.alpha_composite(img, band)
+    draw = ImageDraw.Draw(img)
     _draw_outlined(draw, (x, y), wrapped, font)
-    img.save(out_path)
+    img.convert("RGB").save(out_path)
     return out_path
 
 
@@ -160,8 +168,9 @@ def _draw_outlined(draw, xy, text, font, fill=(255, 255, 255), outline=(0, 0, 0)
 # --------------------------------------------------------------------------- #
 def _mock_image(prompt: str, size: tuple[int, int]) -> Image.Image:
     w, h = size
-    # Deterministic gradient seeded by the prompt so the same prompt looks stable.
-    seed = abs(hash(prompt)) % (2**32)
+    # Deterministic gradient seeded by the prompt so the same prompt looks stable
+    # across processes too (builtin hash() is salted per interpreter).
+    seed = int.from_bytes(hashlib.sha256(prompt.encode()).digest()[:8], "big")
     rng = np.random.default_rng(seed)
     top = rng.integers(20, 120, size=3)
     bottom = rng.integers(80, 220, size=3)
@@ -177,6 +186,31 @@ def _mock_image(prompt: str, size: tuple[int, int]) -> Image.Image:
     tag_font = _load_font(int(h * 0.028))
     draw.text((w * 0.08, h * 0.04), "MARK · offline preview", font=tag_font, fill=(255, 255, 255))
     return img
+
+
+# Codepoints the bundled fonts can't draw (emoji, pictographs, ZWJ sequences).
+# PIL has no font fallback, so these render as tofu boxes — strip at render
+# time only; the caption/DB keeps the original text.
+_EMOJI_RE = re.compile(
+    "["
+    "\\U00010000-\\U0010FFFF"  # all supplementary planes (emoji, pictographs)
+    "\\u2600-\\u27BF"          # misc symbols + dingbats
+    "\\u2B00-\\u2BFF"          # misc symbols and arrows (stars etc.)
+    "\\uFE00-\\uFE0F"          # variation selectors
+    "\\u200D"                  # zero-width joiner
+    "\\u20E3"                  # combining enclosing keycap
+    "]+"
+)
+
+
+def strip_emoji(text: str) -> str:
+    """Drop codepoints that render as tofu in PIL truetype fonts."""
+    text = text or ""
+    cleaned = _EMOJI_RE.sub("", text)
+    if cleaned == text:
+        return text
+    # Collapse the double spaces left behind by mid-sentence emoji.
+    return "\n".join(" ".join(ln.split()) for ln in cleaned.splitlines())
 
 
 def _wrap(text: str, draw, font, max_width: int) -> str:

@@ -83,7 +83,19 @@ def gather_context(app: App, llm: LLM, product: dict, platform: str,
                                product_id=product["id"], level="error")
         bandit_picks = {}
 
-    return {"trends": trends, "winners": winners, "bandit_picks": bandit_picks}
+    # Analyzer insights — the weekly plain-language findings feed back into
+    # generation as standing adjustments (they were previously display-only).
+    insights: list[str] = []
+    try:
+        from .learning import feedback as feedback_mod
+
+        latest = feedback_mod.latest_insights(app, product["id"]) or {}
+        insights = list(latest.get("recommended_adjustments") or [])[:5]
+    except Exception:
+        insights = []
+
+    return {"trends": trends, "winners": winners, "bandit_picks": bandit_picks,
+            "insights": insights}
 
 
 def _choose_policy(app: App, product: dict, platform: str) -> str:
@@ -213,7 +225,7 @@ def generate_one(app: App, llm: LLM, product: dict, platform: str,
         app, llm, product, platform,
         trends=ctx["trends"], winners=ctx["winners"], bandit_picks=ctx["bandit_picks"],
         strategy=strategy, episode=episode, forced_trend=forced_trend,
-        character_comments=character_comments,
+        character_comments=character_comments, insights=ctx.get("insights"),
     )
     if forced_trend and not plan.trend_tie_in:
         plan.trend_tie_in = forced_trend.get("topic")

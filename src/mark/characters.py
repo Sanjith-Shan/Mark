@@ -41,6 +41,25 @@ def create(app: App, product_id: str, *, name: str, persona: str, visual_desc: s
     return get(app, cid)
 
 
+def create_from_concept(app: App, product_id: str, concept: dict) -> dict:
+    """Create a character from an onboarding character-concept dict, initializing
+    lore_state the way the shipped bibles (config/characters/*.yaml) do: episode
+    counter at zero, empty NPC roster and arc list — the persona text carries the
+    off-screen antagonist until episodes make it canon."""
+    character = create(
+        app, product_id,
+        name=(concept.get("name") or "Mascot").strip(),
+        persona=(concept.get("persona") or "").strip(),
+        visual_desc=(concept.get("visual_desc") or "").strip(),
+        role=concept.get("role") or "ambassador",
+        voice=concept.get("voice"),
+        catchphrases=concept.get("catchphrases") or [],
+    )
+    db_module.update(app.conn, "characters", character["id"],
+                     lore_state={"episodes_posted": 0, "npcs": {}, "active_arcs": []})
+    return get(app, character["id"])
+
+
 def get(app: App, character_id: int) -> Optional[dict]:
     row = db_module.query_one(app.conn, "SELECT * FROM characters WHERE id = ?",
                               (character_id,))
@@ -56,14 +75,23 @@ def list_for_product(app: App, product_id: str, include_inactive: bool = False) 
 
 
 def active_character(app: App, product_id: str) -> Optional[dict]:
-    """The character content should be fronted by (newest active one)."""
-    row = db_module.query_one(
+    """The character content should be fronted by. One active character → that
+    one. Several → rotate by fewest episodes posted (the newcomer catches up,
+    the established one keeps its cadence) instead of the old newest-wins rule,
+    which silently retired the primary the moment a second was switched on."""
+    rows = db_module.query(
         app.conn,
         "SELECT * FROM characters WHERE product_id = ? AND active = 1 "
-        "ORDER BY created_at DESC LIMIT 1",
+        "ORDER BY created_at ASC",
         (product_id,),
     )
-    return _decode(db_module.row_to_dict(row))
+    characters = [_decode(dict(r)) for r in rows]
+    if not characters:
+        return None
+    if len(characters) == 1:
+        return characters[0]
+    return min(characters,
+               key=lambda c: int((c.get("lore_state") or {}).get("episodes_posted") or 0))
 
 
 def update(app: App, character_id: int, **fields) -> Optional[dict]:
@@ -179,10 +207,13 @@ def on_episode_approved(app: App, character_id: int) -> None:
         return
     lore = character.get("lore_state") or {}
     lore["episodes_posted"] = int(lore.get("episodes_posted") or 0) + 1
-    # The signature counter (e.g. Poli's applications_submitted) creeps upward.
-    for key in ("applications_submitted", "applications_rejected"):
-        if key in lore and isinstance(lore[key], int):
-            lore[key] += 1 + (lore["episodes_posted"] % 7)
+    # Signature counters creep upward with every episode. Not hardcoded to one
+    # bible's key names: EVERY top-level integer counter advances (Poli's
+    # applications_submitted + rejections_survived, any future character's
+    # counters) — a frozen signature counter kills the lore's forward motion.
+    for key, value in list(lore.items()):
+        if key != "episodes_posted" and isinstance(value, int):
+            lore[key] = value + 1 + (lore["episodes_posted"] % 7)
     db_module.update(app.conn, "characters", character_id, lore_state=lore)
 
 

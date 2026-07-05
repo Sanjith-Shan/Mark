@@ -25,7 +25,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 from ..app import App
-from .images import _load_font, _parse_size
+from .images import _load_font, _parse_size, strip_emoji
 
 # Corporate-neutral palette (adjacent to, but legally distinct from, the tools
 # being satirized).
@@ -70,6 +70,10 @@ def render_ui_mockup(app: App, slide_lines: list[str], out_path: Path,
     img = Image.new("RGB", (w, h), BG)
     draw = ImageDraw.Draw(img)
     title, rows = parse_spec(slide_lines)
+    # Emoji render as tofu boxes in PIL truetype fonts — strip at render time
+    # only; the slide_texts in the DB keep them.
+    title = strip_emoji(title)
+    rows = [(kind, strip_emoji(value)) for kind, value in rows]
 
     # Window card.
     margin = int(w * 0.07)

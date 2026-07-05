@@ -260,7 +260,8 @@ def strategist_system(product: dict, platform: str, trends: list[dict],
                       winners: list[dict], bandit_picks: dict,
                       allowed_types: list[str], strategy=None, episode: int = 1,
                       forced_trend: Optional[dict] = None,
-                      character_comments: Optional[list[str]] = None) -> str:
+                      character_comments: Optional[list[str]] = None,
+                      insights: Optional[list[str]] = None) -> str:
     strat = strategy_block(strategy, platform, episode)
     strat_brief = f"\nSTRATEGY BRIEF: {strategy.strategist_brief}" if strategy and strategy.strategist_brief else ""
     knowledge = knowledge_block(product, strategy)
@@ -270,6 +271,11 @@ def strategist_system(product: dict, platform: str, trends: list[dict],
         mined = ("\nAUDIENCE COMMENTS ON RECENT EPISODES (mine these for canon — "
                  "what the audience jokes about becomes lore; community "
                  "co-authorship converts commenters into superfans):\n" + listing)
+    learned = ""
+    if insights:
+        listing = "\n".join(f"- {i}" for i in insights[:5])
+        learned = ("\nLEARNED ADJUSTMENTS (from this account's own performance "
+                   "analysis — standing guidance, apply where relevant):\n" + listing)
     forced = ""
     if forced_trend:
         style = (forced_trend.get("style_notes") or "").strip()
@@ -282,7 +288,7 @@ def strategist_system(product: dict, platform: str, trends: list[dict],
     from . import rating as rating_mod
 
     return f"""You are a world-class social media strategist for {product['name']}.
-{strat}{strat_brief}{knowledge}{mined}{forced}
+{strat}{strat_brief}{knowledge}{mined}{learned}{forced}
 
 {product_block(product)}
 {rating_mod.guidance_block(product, platform)}

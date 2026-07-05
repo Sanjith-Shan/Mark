@@ -63,11 +63,20 @@ def _elevenlabs(app: App, text: str, out_path: Path, voice: str,
                 content_id, product_id) -> tuple[Path, float]:
     import httpx
 
-    # ElevenLabs multilingual v2; `voice` may be a voice id. The API requires a
-    # voice ID (not a name) — fall back to Rachel's actual ID when the config
-    # holds an OpenAI-style voice name like "onyx".
+    # ElevenLabs multilingual v2. The API requires a voice ID in the URL, but
+    # `voice` may be an ID, an ElevenLabs voice NAME (per-character voices are
+    # configured by name), or an OpenAI-style name like "onyx" leaking from the
+    # global default. IDs pass straight through; names are resolved via the
+    # voices API; Rachel is only the last resort — always forcing her destroyed
+    # per-character voice identity.
     DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"  # Rachel
-    voice_id = voice if voice and voice[0].isalnum() and len(voice) > 10 else DEFAULT_VOICE_ID
+    voice_id = None
+    if voice:
+        if len(voice) >= 20 and voice.isalnum():
+            voice_id = voice  # already an ElevenLabs voice ID
+        else:
+            voice_id = _resolve_voice_id(app, voice)
+    voice_id = voice_id or DEFAULT_VOICE_ID
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
     headers = {"xi-api-key": app.keys.elevenlabs, "Content-Type": "application/json"}
     payload = {"text": text, "model_id": "eleven_multilingual_v2"}
@@ -79,6 +88,25 @@ def _elevenlabs(app: App, text: str, out_path: Path, voice: str,
     log_external_cost(app, "elevenlabs", "tts", "eleven_multilingual_v2", units=len(text),
                       content_id=content_id, product_id=product_id)
     return mp3, media_duration(mp3) or estimate_duration(text)
+
+
+def _resolve_voice_id(app: App, name: str) -> str | None:
+    """Resolve an ElevenLabs voice name to its ID (case-insensitive) via
+    GET /v1/voices. Returns None when the name doesn't match any voice
+    (e.g. an OpenAI voice name like "onyx")."""
+    import httpx
+
+    try:
+        with httpx.Client(timeout=30) as client:
+            resp = client.get("https://api.elevenlabs.io/v1/voices",
+                              headers={"xi-api-key": app.keys.elevenlabs})
+            resp.raise_for_status()
+            for v in resp.json().get("voices", []):
+                if (v.get("name") or "").strip().lower() == name.strip().lower():
+                    return v.get("voice_id")
+    except Exception:
+        pass
+    return None
 
 
 def _silent_wav(path: Path, seconds: float, rate: int = 44100) -> None:
