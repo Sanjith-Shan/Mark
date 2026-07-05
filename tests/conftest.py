@@ -15,11 +15,21 @@ from mark.config import ProductConfig
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
+def enable_fast_learning(home: Path) -> None:
+    """Make the learning loop immediate for tests: no reward-maturity wait, no
+    minimum baseline sample (production defaults wait 48h and 3 posts)."""
+    cfg = home / "config" / "default.yaml"
+    with cfg.open("a") as f:
+        f.write("\nlearning:\n  reward_maturity_hours: 0\n  min_baseline_posts: 1\n"
+                "  holdout_pct: 0.0\n")
+
+
 @pytest.fixture
 def app(tmp_path, monkeypatch):
     for key in ("OPENAI_API_KEY", "FAL_KEY", "UPLOAD_POST_API_KEY", "ELEVENLABS_API_KEY"):
         monkeypatch.delenv(key, raising=False)
     shutil.copytree(REPO_ROOT / "config", tmp_path / "config")
+    enable_fast_learning(tmp_path)
     a = get_app(home=tmp_path, force_mock=True)
     product = ProductConfig(
         id="testco", name="TestCo",

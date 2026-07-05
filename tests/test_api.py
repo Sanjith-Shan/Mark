@@ -31,6 +31,9 @@ def client(tmp_path_factory):
     mp.setenv("MARK_MOCK", "1")
     home = tmp_path_factory.mktemp("mark-home")
     shutil.copytree(REPO_ROOT / "config", home / "config", dirs_exist_ok=True)
+    from tests.conftest import enable_fast_learning
+
+    enable_fast_learning(home)
     app = create_app(home=home, force_mock=True)
     with TestClient(app) as c:
         yield c

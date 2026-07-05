@@ -224,6 +224,7 @@ CREATE INDEX IF NOT EXISTS idx_content_product ON content(product_id);
 CREATE INDEX IF NOT EXISTS idx_metrics_post ON metrics(post_id);
 CREATE INDEX IF NOT EXISTS idx_posts_content ON posts(content_id);
 CREATE INDEX IF NOT EXISTS idx_winners_platform ON winners(platform, content_type);
+CREATE INDEX IF NOT EXISTS idx_trends_topic_time ON trends(topic, collected_at);
 """
 
 
@@ -274,6 +275,7 @@ MIGRATIONS: list[tuple[str, str, str]] = [
     ("products", "content_rating", "TEXT"),    # "clean" | "standard" | "edgy" (platform caps still apply)
     ("products", "trend_sources", "TEXT"),     # JSON: {subreddits: [], keywords: []} per-campaign radar
     ("products", "strategy_catalog", "TEXT"),  # JSON: campaign-adapted strategy briefs (onboarding output)
+    ("trends", "product_id", "TEXT"),          # campaign scoping — relevance is per-campaign
 ]
 
 

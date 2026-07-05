@@ -78,7 +78,8 @@ def punch_up(
     mechanism = _choose(bandit_picks.get("humor_mechanism"), HUMOR_MECHANISMS, plan.topic)
     personas = _persona_lineup(bandit_picks.get("humor_persona"), n)
     candidates = _fanout(app, llm, product, platform, plan, draft, violation,
-                         personas, mechanism, bank, model, content_id=content_id)
+                         personas, mechanism, bank, model, content_id=content_id,
+                         character=character)
     candidates = [c for c in candidates if _scaffold_complete(c)]
     if not candidates:
         return draft
@@ -98,8 +99,15 @@ def punch_up(
         survivors = [c for c in candidates if c is not winner]
         winner = None
         for c in survivors:
-            if not _is_guessable(app, llm, c, model, content_id=content_id,
-                                 product_id=product["id"]):
+            if _is_guessable(app, llm, c, model, content_id=content_id,
+                             product_id=product["id"]):
+                continue
+            # A promoted runner-up must clear the same BVT gates the champion
+            # did — a tournament loser can be unguessable AND bland/off-brand.
+            _, v = _rank(app, llm, product, platform, [c],
+                         content_id=content_id, product_id=product["id"])
+            if v and v.violation_strength >= cfg.min_violation \
+                    and v.benignness >= cfg.min_benignness:
                 winner = c
                 break
         if winner is None:
@@ -145,10 +153,13 @@ def _choose(bandit_value: Optional[str], pool: list[str], seed_text: str) -> str
 
 
 def _fanout(app, llm, product, platform, plan, draft, violation, personas,
-            mechanism, bank, model, content_id=None) -> list[JokeCandidate]:
+            mechanism, bank, model, content_id=None,
+            character=None) -> list[JokeCandidate]:
     result = llm.parse(
+        # Character must flow through: without it, mascot episodes get their
+        # voice and lore stripped at the exact step that writes the final copy.
         prompts.humor_fanout_system(product, platform, plan, violation,
-                                    personas, mechanism, bank),
+                                    personas, mechanism, bank, character=character),
         prompts.humor_fanout_user(plan, draft),
         JokeCandidates, model=model, temperature=0.95,
         product_id=product["id"], content_id=content_id,
@@ -163,40 +174,48 @@ def _scaffold_complete(c: JokeCandidate) -> bool:
                 and c.target_assumption.strip() and c.reinterpretation.strip())
 
 
+def _judge_pair(app, llm, product, platform, calib, a, b,
+                content_id=None, product_id=None) -> PairwiseVerdict:
+    return llm.parse(
+        prompts.pairwise_judge_system(product, platform, calibration=calib),
+        prompts.pairwise_judge_user(a, b),
+        PairwiseVerdict,
+        model=app.settings.llm.judge_model, temperature=0.2,
+        product_id=product_id, content_id=content_id,
+        mock_factory=lambda: PairwiseVerdict(winner=0, violation_strength=0.7,
+                                             benignness=0.8, guessable=False,
+                                             reasoning="offline: keep first"),
+    )
+
+
 def _rank(app, llm, product, platform, candidates,
           content_id=None, product_id=None):
     """Winner-stays pairwise tournament. N-1 cheap judge calls. The judge is
     calibrated with real preference pairs mined from this account's own
-    engagement history (the documented expert-level-ranking lever)."""
+    engagement history (the documented expert-level-ranking lever).
+
+    Presentation order alternates each round: LLM judges favor position [0],
+    and the reigning champion (seeded from the bandit-preferred persona) sitting
+    permanently in slot 0 would compound that bias into both joke selection and
+    the humor_persona arm's learning signal.
+    """
     from .learning import calibration
 
     calib = calibration.calibration_block(app, product["id"], platform)
     champion = candidates[0]
     verdict: Optional[PairwiseVerdict] = None
-    for challenger in candidates[1:]:
-        v = llm.parse(
-            prompts.pairwise_judge_system(product, platform, calibration=calib),
-            prompts.pairwise_judge_user(champion, challenger),
-            PairwiseVerdict,
-            model=app.settings.llm.judge_model, temperature=0.2,
-            product_id=product_id, content_id=content_id,
-            mock_factory=lambda: PairwiseVerdict(winner=0, violation_strength=0.7,
-                                                 benignness=0.8, guessable=False,
-                                                 reasoning="offline: keep champion"),
-        )
-        if v.winner == 1:
+    for i, challenger in enumerate(candidates[1:]):
+        champion_first = (i % 2 == 0)
+        a, b = (champion, challenger) if champion_first else (challenger, champion)
+        v = _judge_pair(app, llm, product, platform, calib, a, b,
+                        content_id=content_id, product_id=product_id)
+        challenger_won = (v.winner == 1) if champion_first else (v.winner == 0)
+        if challenger_won:
             champion = challenger
         verdict = v
     if verdict is None:  # single candidate — judge it against itself for the gate scores
-        verdict = llm.parse(
-            prompts.pairwise_judge_system(product, platform, calibration=calib),
-            prompts.pairwise_judge_user(champion, champion),
-            PairwiseVerdict,
-            model=app.settings.llm.judge_model, temperature=0.2,
-            product_id=product_id, content_id=content_id,
-            mock_factory=lambda: PairwiseVerdict(winner=0, violation_strength=0.7,
-                                                 benignness=0.8, guessable=False),
-        )
+        verdict = _judge_pair(app, llm, product, platform, calib, champion, champion,
+                              content_id=content_id, product_id=product_id)
     return champion, verdict
 
 

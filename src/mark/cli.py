@@ -532,12 +532,18 @@ def learn(
     prod = _resolve_product_or_exit(a, product)
     with console.status("[bold]Running feedback loop…[/]"):
         report = feedback.run(a, LLM(a), prod, days=days)
+    lift = report.get("holdout_lift")
+    lift_line = (f"\nholdout lift:        [bold]{lift['lift_pct']:+.1f}%[/] "
+                 f"(bandit {lift['bandit_avg_reward']} over {lift['bandit_posts']} posts "
+                 f"vs random {lift['holdout_avg_reward']} over {lift['holdout_posts']})"
+                 if lift else "\nholdout lift:        (not enough data yet)")
+    baselines = ", ".join(f"{k}={v}" for k, v in (report.get("baselines") or {}).items())
     console.print(Panel.fit(
-        f"baseline engagement: [bold]{report['baseline_engagement']}[/]\n"
-        f"posts evaluated:     {report['posts_evaluated']}\n"
-        f"bandit updates:      {report['bandit_updates']}\n"
+        f"platform baselines:  [bold]{baselines or '—'}[/]\n"
+        f"rewards applied:     {report['rewards_applied']}"
+        f" (awaiting baseline: {report['awaiting_baseline']})\n"
         f"new winners:         {report['new_winners']}  (total {report['total_winners']})\n"
-        f"sentiment:           {report['sentiment']}",
+        f"sentiment:           {report['sentiment']}{lift_line}",
         title="feedback loop",
     ))
     _render_insights(report["insights"])

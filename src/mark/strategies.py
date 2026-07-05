@@ -47,6 +47,9 @@ class Strategy(BaseModel):
     mix_weight: float = 0.1             # cold-start sampling prior (bandit takes over)
     never_auto_approve: bool = False    # e.g. founder voice / Reddit drafts
     knowledge_pool: Optional[str] = None  # product knowledge key this strategy draws on
+    requires_product: bool = False      # needs a real product (demos, receipts, founder voice)
+                                        # — excluded for entertainment campaigns where the
+                                        # content itself IS the business
 
     def fits(self, platform: str) -> bool:
         return platform in self.platforms
@@ -226,6 +229,7 @@ STRATEGIES: list[Strategy] = [
         },
         content_types=["video"],
         humor_level="light",
+        requires_product=True,
         strategist_brief=(
             "Pick one demo moment: autofill ripping through a Workday form; 60 "
             "applications during one lecture (time-lapse); tracker before/after; a "
@@ -488,6 +492,7 @@ STRATEGIES: list[Strategy] = [
         },
         content_types=["image", "text", "video"],
         humor_level="none",
+        requires_product=True,
         strategist_brief=(
             "Anchor on ONE genuinely notable real number or event. Specific, odd, "
             "slightly-too-precise numbers beat round ones. NEVER invent metrics, "
@@ -569,6 +574,7 @@ STRATEGIES: list[Strategy] = [
         content_types=["text"],
         humor_level="light",
         never_auto_approve=True,
+        requires_product=True,
         strategist_brief=(
             "Anchor on a real event: a release, a metric threshold, a weird data find, a "
             "failure worth telling. Customer stories beat revenue screenshots."
@@ -610,16 +616,46 @@ def product_allowlist(product: dict) -> Optional[list[str]]:
     return allowed if isinstance(allowed, list) else None
 
 
-def eligible(app: App, product: dict, platform: str) -> list[Strategy]:
-    """Strategies that fit this platform, the platform's allowed content types,
-    and the product's allowlist."""
-    allowed_types = set(app.settings.platform(platform).content_types or ["text"])
-    allowlist = product_allowlist(product)
+def is_entertainment(product: Optional[dict]) -> bool:
+    """Content-as-the-business campaigns: no product to market — the account
+    exists purely to entertain, and performance IS the goal."""
+    return bool(product) and (product.get("kind") or "product") == "entertainment"
+
+
+def catalog_for(product: Optional[dict]) -> list[Strategy]:
+    """The campaign's strategy catalog: the base catalog with any per-campaign
+    brief overrides applied (products.strategy_catalog JSON, written by the
+    onboarding pipeline). The base briefs encode the SudoApply research; a new
+    campaign gets its own domain-specific briefs without forking the code."""
+    if not product:
+        return STRATEGIES
+    overrides = db_module.loads(product.get("strategy_catalog"), {}) or {}
+    if not overrides:
+        return STRATEGIES
     out = []
     for s in STRATEGIES:
+        o = overrides.get(s.id)
+        if isinstance(o, dict):
+            fields = {k: v for k, v in o.items() if k in Strategy.model_fields}
+            if fields:
+                s = s.model_copy(update=fields)
+        out.append(s)
+    return out
+
+
+def eligible(app: App, product: dict, platform: str) -> list[Strategy]:
+    """Strategies that fit this platform, the platform's allowed content types,
+    the product's allowlist, and the campaign kind."""
+    allowed_types = set(app.settings.platform(platform).content_types or ["text"])
+    allowlist = product_allowlist(product)
+    entertainment = is_entertainment(product)
+    out = []
+    for s in catalog_for(product):
         if not s.fits(platform):
             continue
         if allowlist is not None and s.id not in allowlist:
+            continue
+        if entertainment and s.requires_product:
             continue
         if not any(t in allowed_types for t in s.content_types):
             continue
@@ -637,7 +673,15 @@ def pick(app: App, product: dict, platform: str,
     """
     pool = eligible(app, product, platform)
     if not pool:
-        return None
+        # Entertainment campaigns on demo-heavy platform configs can filter the
+        # pool empty; fall back to the platform-fitting non-product strategies.
+        if is_entertainment(product):
+            allowed_types = set(app.settings.platform(platform).content_types or ["text"])
+            pool = [s for s in catalog_for(product)
+                    if s.fits(platform) and not s.requires_product
+                    and any(t in allowed_types for t in s.content_types)]
+        if not pool:
+            return None
     if bandit_choice:
         for s in pool:
             if s.id == bandit_choice:
@@ -657,22 +701,34 @@ def pick(app: App, product: dict, platform: str,
 
 def episode_number(app: App, product: dict, platform: str, strategy: Strategy) -> int:
     """1-based episode number for episodic strategies — how many pieces of content
-    this product has already generated under this strategy, plus one."""
+    this product has actually kept (not rejected/failed) under this strategy,
+    plus one. Counting dead drafts would desync numbering from the on-air lore."""
     if not strategy.series_format:
         return 1
     row = db_module.query_one(
         app.conn,
         "SELECT COUNT(*) AS n FROM content WHERE product_id = ? "
-        "AND strategy_context LIKE ?",
+        "AND status NOT IN ('rejected', 'failed') AND strategy_context LIKE ?",
         (product["id"], f'%"strategy": "{strategy.id}"%'),
     )
     return (row["n"] if row else 0) + 1
 
 
-def candidate_ids(app: App, platform: str) -> list[str]:
+def candidate_ids(app: App, platform: str, product: Optional[dict] = None) -> list[str]:
     """All strategy ids that could apply on this platform (bandit arm values).
-    Product allowlists are enforced at pick() time, not here — arms are shared
-    per (platform, product) and unused arms are harmless."""
+    With a product, campaign restrictions (kind, allowlist) are honored so the
+    bandit's learned strategy pick is always one the campaign can actually use."""
     allowed_types = set(app.settings.platform(platform).content_types or ["text"])
-    return [s.id for s in STRATEGIES
-            if s.fits(platform) and any(t in allowed_types for t in s.content_types)]
+    entertainment = is_entertainment(product)
+    allowlist = product_allowlist(product) if product else None
+    out = []
+    for s in catalog_for(product):
+        if not s.fits(platform):
+            continue
+        if entertainment and s.requires_product:
+            continue
+        if allowlist is not None and s.id not in allowlist:
+            continue
+        if any(t in allowed_types for t in s.content_types):
+            out.append(s.id)
+    return out

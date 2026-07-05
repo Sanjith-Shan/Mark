@@ -1,13 +1,21 @@
-"""Feedback loop orchestrator — the weekly self-improvement pass.
+"""Feedback loop orchestrator — the self-improvement pass.
 
   1. Collect fresh metrics.
-  2. Compute the account baseline engagement rate.
-  3. Normalize each post's engagement into a reward (rate / baseline, capped at 1).
-  4. Update the bandit arms with those rewards.
-  5. Re-index the RAG-of-winners.
+  2. Decay old bandit evidence (half-life; enables adaptation to shifts).
+  3. Reward every mature, not-yet-rewarded post EXACTLY ONCE:
+       - baseline = this platform's trailing median engagement (never pooled
+         across platforms — platform norms differ 2-4x)
+       - reward   = graded, saturation-free: rate/(rate+baseline) mixed with a
+         click-through component (business results, not just vanity engagement)
+  4. Update the bandit arms with those rewards; stamp posts.rewarded_at.
+  5. Re-index the RAG-of-winners (per-platform, freshness-windowed).
   6. Analyze comment sentiment.
   7. Run the analyzer to produce insights and store them.
-  8. Prune stale winners (handled inside refresh_winners).
+  8. Compute the holdout lift report — bandit-policy posts vs random-policy
+     posts — the standing empirical proof that learning is lifting performance.
+
+Because rewards are idempotent (a post is credited once, when mature), this is
+safe to run daily or even hourly; the weekly cron is just the floor.
 """
 
 from __future__ import annotations
@@ -23,13 +31,42 @@ from ..app import App
 from ..llm import LLM
 from . import bandit, winners
 
+BASELINE_WINDOW_DAYS = 60   # trailing window for platform baselines
+CLICK_WEIGHT = 0.15         # share of the reward carried by click-through
 
-def _posted_with_metrics(app: App, product_id: str, days: int) -> list[dict]:
+
+def _unrewarded_mature_posts(app: App, product_id: str, maturity_hours: int) -> list[dict]:
+    """Posts that are old enough to have stable metrics and were never credited."""
     rows = db_module.query(
         app.conn,
         """
         SELECT c.id, c.product_id, c.platform, c.content_type, c.strategy_context,
-               p.posted_at, m.engagement_rate
+               p.id AS post_id, p.posted_at,
+               m.engagement_rate, m.views, m.clicks
+        FROM content c
+        JOIN posts p ON p.content_id = c.id
+        JOIN metrics m ON m.post_id = p.id
+        WHERE c.product_id = ? AND c.status = 'posted'
+          AND p.rewarded_at IS NULL
+          AND p.posted_at <= datetime('now', ?)
+          AND m.id = (SELECT m2.id FROM metrics m2 WHERE m2.post_id = p.id
+                      ORDER BY m2.collected_at DESC LIMIT 1)
+        """,
+        (product_id, f"-{int(maturity_hours)} hours"),
+    )
+    return [dict(r) for r in rows]
+
+
+def _platform_baselines(app: App, product_id: str) -> dict[str, dict]:
+    """Per-platform trailing medians of engagement rate and click rate.
+
+    Uses each post's LATEST metric within the window. Returns
+    {platform: {"n": count, "engagement": median_er, "clicks": median_cr}}.
+    """
+    rows = db_module.query(
+        app.conn,
+        """
+        SELECT c.platform, m.engagement_rate, m.views, m.clicks
         FROM content c
         JOIN posts p ON p.content_id = c.id
         JOIN metrics m ON m.post_id = p.id
@@ -38,9 +75,43 @@ def _posted_with_metrics(app: App, product_id: str, days: int) -> list[dict]:
           AND m.id = (SELECT m2.id FROM metrics m2 WHERE m2.post_id = p.id
                       ORDER BY m2.collected_at DESC LIMIT 1)
         """,
-        (product_id, f"-{int(days)} days"),
+        (product_id, f"-{BASELINE_WINDOW_DAYS} days"),
     )
-    return [dict(r) for r in rows]
+    by_platform: dict[str, list[dict]] = {}
+    for r in rows:
+        by_platform.setdefault(r["platform"], []).append(dict(r))
+
+    def median(vals: list[float]) -> float:
+        vals = sorted(vals)
+        n = len(vals)
+        if not n:
+            return 0.0
+        mid = n // 2
+        return vals[mid] if n % 2 else (vals[mid - 1] + vals[mid]) / 2.0
+
+    out = {}
+    for platform, items in by_platform.items():
+        ers = [i["engagement_rate"] or 0.0 for i in items]
+        crs = [(i["clicks"] or 0) / max(i["views"] or 0, 1) for i in items]
+        out[platform] = {"n": len(items), "engagement": median(ers), "clicks": median(crs)}
+    return out
+
+
+def graded_reward(rate: float, baseline: float,
+                  click_rate: float = 0.0, click_baseline: float = 0.0) -> float:
+    """Saturation-free reward in [0, 1]; performing exactly at baseline = 0.5.
+
+    rate/(rate+baseline) preserves magnitude ordering all the way up: baseline
+    → 0.5, 3x baseline → 0.75, 10x → ~0.91. A viral hit and a slightly-above-
+    average post are DIFFERENT signals — the old min(rate/baseline, 1) cap made
+    them identical, flattening the gradient toward greatness.
+    """
+    b = max(baseline, 1e-9)
+    r_eng = rate / (rate + b) if (rate + b) > 0 else 0.5
+    if click_baseline > 1e-9:
+        r_clk = click_rate / (click_rate + click_baseline)
+        return (1.0 - CLICK_WEIGHT) * r_eng + CLICK_WEIGHT * r_clk
+    return r_eng
 
 
 def _nearest_time(posted_at: Optional[str], times: list[str],
@@ -63,25 +134,70 @@ def _nearest_time(posted_at: Optional[str], times: list[str],
     return min(times, key=lambda t: min(abs(to_h(t) - hour), 24 - abs(to_h(t) - hour)))
 
 
+def apply_rewards(app: App, product_id: str) -> dict:
+    """Steps 2-4: decay, then credit every mature unrewarded post exactly once."""
+    lcfg = app.settings.learning
+    bandit.decay(app, product_id, lcfg.decay_half_life_days)
+
+    posts = _unrewarded_mature_posts(app, product_id, lcfg.reward_maturity_hours)
+    baselines = _platform_baselines(app, product_id)
+    applied, skipped = 0, 0
+    for p in posts:
+        base = baselines.get(p["platform"])
+        if not base or base["n"] < lcfg.min_baseline_posts:
+            skipped += 1  # stays unrewarded; credited once the platform has a baseline
+            continue
+        rate = p["engagement_rate"] or 0.0
+        click_rate = (p["clicks"] or 0) / max(p["views"] or 0, 1)
+        reward = graded_reward(rate, base["engagement"], click_rate, base["clicks"])
+        post_time = _nearest_time(p["posted_at"],
+                                  app.settings.platform(p["platform"]).optimal_times,
+                                  tz_name=app.settings.scheduling.timezone)
+        bandit.update_from_content(app, p, reward, post_time=post_time)
+        db_module.update(app.conn, "posts", p["post_id"],
+                         rewarded_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
+                         reward=round(reward, 5))
+        applied += 1
+    return {"rewards_applied": applied, "awaiting_baseline": skipped,
+            "baselines": {k: round(v["engagement"], 5) for k, v in baselines.items()}}
+
+
+def holdout_lift(app: App, product_id: str, days: int = 90) -> Optional[dict]:
+    """Compare rewarded posts generated by the bandit policy vs the random
+    holdout policy. Positive lift = empirical proof the learning loop works.
+    Returns None until both groups have data."""
+    rows = db_module.query(
+        app.conn,
+        """
+        SELECT c.strategy_context, p.reward
+        FROM content c JOIN posts p ON p.content_id = c.id
+        WHERE c.product_id = ? AND p.reward IS NOT NULL
+          AND p.posted_at >= datetime('now', ?)
+        """,
+        (product_id, f"-{int(days)} days"),
+    )
+    bandit_rs, holdout_rs = [], []
+    for r in rows:
+        sctx = db_module.loads(r["strategy_context"], {}) or {}
+        (holdout_rs if sctx.get("policy") == "holdout" else bandit_rs).append(r["reward"])
+    if not bandit_rs or not holdout_rs:
+        return None
+    b = sum(bandit_rs) / len(bandit_rs)
+    h = sum(holdout_rs) / len(holdout_rs)
+    return {
+        "bandit_posts": len(bandit_rs), "bandit_avg_reward": round(b, 4),
+        "holdout_posts": len(holdout_rs), "holdout_avg_reward": round(h, 4),
+        "lift_pct": round((b - h) / max(h, 1e-9) * 100.0, 1),
+    }
+
+
 def run(app: App, llm: LLM, product: dict, days: int = 7, collect: bool = True) -> dict:
     product_id = product["id"]
 
     if collect:
         collector.collect(app, product_id=product_id)
 
-    posts = _posted_with_metrics(app, product_id, days)
-    rewards_applied = 0
-    baseline = 0.0
-    if posts:
-        rates = [p["engagement_rate"] or 0.0 for p in posts]
-        baseline = (sum(rates) / len(rates)) or 1e-6
-        for p in posts:
-            reward = min((p["engagement_rate"] or 0.0) / baseline, 1.0)
-            post_time = _nearest_time(p["posted_at"],
-                                      app.settings.platform(p["platform"]).optimal_times,
-                                      tz_name=app.settings.scheduling.timezone)
-            bandit.update_from_content(app, p, reward, post_time=post_time)
-            rewards_applied += 1
+    reward_report = apply_rewards(app, product_id)
 
     new_winners = winners.refresh_winners(app, llm, product)
 
@@ -98,15 +214,17 @@ def run(app: App, llm: LLM, product: dict, days: int = 7, collect: bool = True) 
     db_module.insert(app.conn, "insights", product_id=product_id,
                      payload=json.dumps(insights.model_dump()))
 
+    lift = holdout_lift(app, product_id)
+
     report = {
         "product_id": product_id,
-        "baseline_engagement": round(baseline, 5),
-        "posts_evaluated": len(posts),
-        "bandit_updates": rewards_applied,
+        **reward_report,
+        "bandit_updates": reward_report["rewards_applied"],
         "new_winners": len(new_winners),
         "total_winners": winners.count(app, product_id),
         "media_pruned": pruned,
         "sentiment": sentiment_summary,
+        "holdout_lift": lift,
         "insights": insights.model_dump(),
         "ran_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
     }

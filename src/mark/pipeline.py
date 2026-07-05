@@ -31,9 +31,14 @@ def _now() -> str:
 # --------------------------------------------------------------------------- #
 # Context gathering (trends / winners / bandit). Filled out in later phases.
 # --------------------------------------------------------------------------- #
-def gather_context(app: App, llm: LLM, product: dict, platform: str) -> dict:
+def gather_context(app: App, llm: LLM, product: dict, platform: str,
+                   policy: str = "bandit") -> dict:
     """Collect the inputs the strategist & writer use. Degrades to empty context
-    when the trends/learning subsystems have no data yet."""
+    when the trends/learning subsystems have no data yet — but every degradation
+    is logged: the evolution loop silently dying is how a learning system rots.
+    """
+    from . import db as db_module
+
     trends: list[dict] = []
     winners: list[dict] = []
     bandit_picks: dict = {}
@@ -42,8 +47,11 @@ def gather_context(app: App, llm: LLM, product: dict, platform: str) -> dict:
     try:
         from .trends import aggregator
 
-        trends = aggregator.recent_trends(app, platform=platform, limit=10)
-    except Exception:
+        trends = aggregator.recent_trends(app, platform=platform, limit=10,
+                                          product_id=product["id"])
+    except Exception as exc:
+        db_module.log_activity(app.conn, "learn", f"trend context failed: {exc}",
+                               product_id=product["id"], level="error")
         trends = []
 
     # Past winners — so the strategist sees what has actually worked before it
@@ -54,18 +62,47 @@ def gather_context(app: App, llm: LLM, product: dict, platform: str) -> dict:
         winners = winners_mod.retrieve(
             app, llm, platform, f"{product['name']} {product['description'][:200]}",
             k=3, product_id=product["id"])
-    except Exception:
+    except Exception as exc:
+        db_module.log_activity(app.conn, "learn", f"winner retrieval failed: {exc}",
+                               product_id=product["id"], level="error")
         winners = []
 
-    # Bandit recommendations.
+    # Policy: learned bandit picks, or uniform-random for holdout generations
+    # (the live control group proving the learning loop lifts performance).
     try:
         from .learning import bandit
 
-        bandit_picks = bandit.recommend(app, product["id"], platform)
-    except Exception:
+        if policy == "holdout":
+            bandit_picks = bandit.random_policy(
+                app, platform, product=product,
+                seed=f"{product['id']}:{platform}:{datetime.now(timezone.utc).isoformat()}")
+        else:
+            bandit_picks = bandit.recommend(app, product["id"], platform, product=product)
+    except Exception as exc:
+        db_module.log_activity(app.conn, "learn", f"bandit recommend failed: {exc}",
+                               product_id=product["id"], level="error")
         bandit_picks = {}
 
     return {"trends": trends, "winners": winners, "bandit_picks": bandit_picks}
+
+
+def _choose_policy(app: App, product: dict, platform: str) -> str:
+    """A slice of generations use a random policy (holdout) so bandit-vs-random
+    lift is measurable forever. Deterministic offline via the content counter."""
+    import random
+
+    pct = max(0.0, min(float(app.settings.learning.holdout_pct), 0.5))
+    if pct <= 0:
+        return "bandit"
+    from . import db as db_module
+
+    row = db_module.query_one(
+        app.conn,
+        "SELECT COUNT(*) AS n FROM content WHERE product_id = ? AND platform = ?",
+        (product["id"], platform))
+    n = row["n"] if row else 0
+    rng = random.Random(f"{product['id']}:{platform}:{n}:policy")
+    return "holdout" if rng.random() < pct else "bandit"
 
 
 def recent_rejection_feedback(app: App, product: dict, platform: str, limit: int = 5) -> list[str]:
@@ -144,7 +181,8 @@ def generate_one(app: App, llm: LLM, product: dict, platform: str,
     from . import characters as characters_mod
     from . import strategies as strategies_mod
 
-    ctx = gather_context(app, llm, product, platform)
+    policy = _choose_policy(app, product, platform)
+    ctx = gather_context(app, llm, product, platform, policy=policy)
     if forced_trend:
         # Fast path: this generation exists to ride ONE specific trend. It goes
         # first in context, and the strategist is told it's non-negotiable.
@@ -202,6 +240,7 @@ def generate_one(app: App, llm: LLM, product: dict, platform: str,
         "tone": plan.tone, "emotional_target": plan.emotional_target,
         "trend_tie_in": plan.trend_tie_in, "reasoning": plan.reasoning,
         "novelty_max_sim": round(novelty.max_sim, 4),
+        "policy": policy,
         "bandit_picks": ctx["bandit_picks"],
         "strategy": strategy.id if strategy else None,
         "strategy_name": strategy.name if strategy else None,

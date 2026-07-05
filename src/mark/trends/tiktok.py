@@ -50,10 +50,17 @@ def _fetch_live(country: str, limit: int) -> list[dict] | None:
             name = it.get("hashtag_name") or it.get("name")
             if not name:
                 continue
+            # "rank" is 1-best ordinal — invert it; "trend" is already a score.
+            if it.get("trend") is not None:
+                score = float(it["trend"])
+            elif it.get("rank") is not None:
+                score = max(0.0, 100.0 - 5.0 * (float(it["rank"]) - 1))
+            else:
+                score = 50.0
             out.append({
                 "source": "tiktok",
                 "topic": name,
-                "raw_score": float(it.get("trend") or it.get("rank") or 50),
+                "raw_score": score,
                 "metadata": {"publish_cnt": it.get("publish_cnt"),
                              "video_views": it.get("video_views")},
             })

@@ -36,7 +36,8 @@ def refresh(app: App, llm: LLM, product: dict, limit_per_source: int = 15) -> li
     """Full refresh — all sources (the slow/expensive ones included)."""
     raw = (tiktok.fetch_trending(app, limit=limit_per_source)
            + google_trends.fetch(app, limit=limit_per_source)
-           + reddit.fetch(app, subreddits=_subreddits(app), limit=limit_per_source)
+           + reddit.fetch(app, subreddits=_subreddits(app, product), limit=limit_per_source)
+           + reddit.fetch_search(app, keywords=_keywords(product), limit=limit_per_source)
            + bluesky.fetch(app, limit=limit_per_source)
            + imgflip.fetch(app, limit=min(limit_per_source, 10)))
     return _score_and_store(app, llm, product, raw)
@@ -46,15 +47,32 @@ def refresh_fast(app: App, llm: LLM, product: dict, limit_per_source: int = 10) 
     """Fast poll — only the free, hours-fresh sources (Reddit rising, Bluesky,
     Google RSS). Runs every ~30 min; Creative Center data lags ~a day so there's
     no point hammering it at this cadence."""
-    raw = (reddit.fetch(app, subreddits=_subreddits(app), limit=limit_per_source)
+    raw = (reddit.fetch(app, subreddits=_subreddits(app, product), limit=limit_per_source)
+           + reddit.fetch_search(app, keywords=_keywords(product), limit=limit_per_source)
            + bluesky.fetch(app, limit=limit_per_source)
            + google_trends.fetch(app, limit=limit_per_source))
     return _score_and_store(app, llm, product, raw)
 
 
-def _subreddits(app: App) -> list[str]:
+def _trend_sources(product: Optional[dict]) -> dict:
+    """Per-campaign radar config: {"subreddits": [...], "keywords": [...]}.
+    Every campaign gets its own watchlist — an entertainment account watching
+    r/AItooruined shares nothing with a job tool watching r/recruitinghell."""
+    if not product:
+        return {}
+    return db_module.loads(product.get("trend_sources"), {}) or {}
+
+
+def _subreddits(app: App, product: Optional[dict] = None) -> list[str]:
+    per_campaign = _trend_sources(product).get("subreddits")
+    if per_campaign:
+        return list(per_campaign)
     subs = getattr(app.settings.trends, "subreddits", None)
     return list(subs) if subs else reddit.DEFAULT_SUBREDDITS
+
+
+def _keywords(product: Optional[dict]) -> list[str]:
+    return list(_trend_sources(product).get("keywords") or [])
 
 
 def _score_and_store(app: App, llm: LLM, product: dict, raw: list[dict]) -> list[dict]:
@@ -80,13 +98,13 @@ def _score_and_store(app: App, llm: LLM, product: dict, raw: list[dict]) -> list
         norm_raw = min(t["raw_score"] / 100.0, 1.0)
         # Relevance dominates; popularity boosts. Irrelevant trends stay low.
         final = round(rel.relevance * (0.4 + 0.6 * norm_raw), 4)
-        velocity = _velocity(app, t["topic"], final)
+        velocity = _velocity(app, t["topic"], norm_raw)
         stage = _stage(velocity, norm_raw)
         meta = dict(t.get("metadata") or {})
         meta.update({"relevance": round(rel.relevance, 3), "raw_score": t["raw_score"],
                      "safe": rel.safe, "sound_dependent": rel.sound_dependent})
         db_module.insert(app.conn, "trends", source=t["source"], topic=t["topic"],
-                         trend_score=final, metadata=meta,
+                         trend_score=final, metadata=meta, product_id=product["id"],
                          style_notes=rel.style_notes or None, velocity=velocity,
                          stage=stage)
         stored.append({"source": t["source"], "topic": t["topic"],
@@ -97,30 +115,46 @@ def _score_and_store(app: App, llm: LLM, product: dict, raw: list[dict]) -> list
     return stored
 
 
-def _velocity(app: App, topic: str, score_now: float):
-    """Score delta vs the most recent prior sighting of this topic (last 7 days).
-    None = first sighting — brand-new trends are the most jump-worthy of all."""
-    row = db_module.query_one(
+# Velocity is measured on the RAW popularity signal over a multi-hour horizon.
+# (The old version diffed the relevance-weighted composite against the previous
+# 30-minute sighting: steady-hot trends read as flat after ONE poll and were
+# vetoed as 'mature', and relevance-scoring noise flipped stages randomly.)
+_VELOCITY_MIN_AGE_HOURS = 2     # ignore sightings younger than this (no resolution)
+_VELOCITY_MAX_AGE_HOURS = 48    # ignore sightings older than this (different era)
+_STAGE_EPS = 0.03               # |velocity| below this = flat
+
+
+def _velocity(app: App, topic: str, norm_raw_now: float):
+    """Delta of normalized raw popularity vs the average of sightings 2-48h ago.
+    None = no history old enough to measure against — treated as a fresh trend
+    (brand-new trends are the most jump-worthy of all)."""
+    rows = db_module.query(
         app.conn,
-        "SELECT trend_score FROM trends WHERE lower(topic) = lower(?) "
-        "AND collected_at >= datetime('now', '-7 days') "
-        "ORDER BY collected_at DESC LIMIT 1",
-        (topic.strip(),),
+        "SELECT metadata FROM trends WHERE lower(topic) = lower(?) "
+        "AND collected_at >= datetime('now', ?) AND collected_at <= datetime('now', ?)",
+        (topic.strip(), f"-{_VELOCITY_MAX_AGE_HOURS} hours",
+         f"-{_VELOCITY_MIN_AGE_HOURS} hours"),
     )
-    if row is None or row["trend_score"] is None:
+    prior = []
+    for r in rows:
+        meta = db_module.loads(r["metadata"], {}) or {}
+        raw = meta.get("raw_score")
+        if isinstance(raw, (int, float)):
+            prior.append(min(float(raw) / 100.0, 1.0))
+    if not prior:
         return None
-    return round(score_now - float(row["trend_score"]), 4)
+    return round(norm_raw_now - sum(prior) / len(prior), 4)
 
 
 def _stage(velocity, norm_raw: float) -> str:
     """Trend lifecycle stage. Rules from docs/research/trend-adaptation.md:
-    first-seen-already-big with no history = mature (we missed the rise);
-    rising/flat/falling from our own longitudinal history otherwise."""
+    first-seen-already-big with no measurable history = mature (we missed the
+    rise); otherwise rising/flat/falling from our own longitudinal history."""
     if velocity is None:
         return "mature" if norm_raw >= 0.7 else "new"
-    if velocity > 0.01:
+    if velocity > _STAGE_EPS:
         return "rising"
-    if velocity < -0.01:
+    if velocity < -_STAGE_EPS:
         return "declining"
     return "mature"
 
@@ -129,31 +163,39 @@ def _stage(velocity, norm_raw: float) -> str:
 # Fast path: hot-trend detection → immediate content generation
 # --------------------------------------------------------------------------- #
 def hot_trends(app: App, limit: int = 5, max_age_hours: int = 6,
-               for_auto_react: bool = True) -> list[dict]:
+               for_auto_react: bool = True,
+               product_id: Optional[str] = None) -> list[dict]:
     """Trends worth reacting to RIGHT NOW: fresh, relevant, safe, new-or-rising.
 
     Jump/skip logic (docs/research/trend-adaptation.md): declining stage is a
     hard veto regardless of score — arriving late to a dying meme reads as brand
     cringe, the worst outcome. Unsafe origin is a hard veto. Sound-dependent
     trends are excluded from AUTO reaction (the posting API can't attach native
-    audio) but still surface for manual action.
+    audio) but still surface for manual action. Vetoes are evaluated on each
+    topic's LATEST sighting — a crashing trend must not slip through via an
+    older, higher-scored row.
     """
     cfg = app.settings.trends
+    scope = "AND (product_id = ? OR product_id IS NULL) " if product_id else ""
+    params: list = [f"-{int(max_age_hours)} hours"]
+    if product_id:
+        params.append(product_id)
     rows = db_module.query(
         app.conn,
         "SELECT source, topic, trend_score, metadata, style_notes, velocity, stage, "
         "collected_at FROM trends "
-        "WHERE collected_at >= datetime('now', ?) AND trend_score >= ? "
-        "ORDER BY trend_score DESC",
-        (f"-{int(max_age_hours)} hours", float(cfg.react_threshold)),
+        f"WHERE collected_at >= datetime('now', ?) {scope}"
+        "ORDER BY collected_at DESC",
+        params,
     )
-    out, seen = [], set()
-    for r in rows:
+    latest: dict[str, dict] = {}
+    for r in rows:  # newest first — first row per topic IS the latest sighting
         d = dict(r)
-        key = d["topic"].strip().lower()
-        if key in seen:
+        latest.setdefault(d["topic"].strip().lower(), d)
+    out = []
+    for d in sorted(latest.values(), key=lambda x: x["trend_score"] or 0.0, reverse=True):
+        if (d["trend_score"] or 0.0) < float(cfg.react_threshold):
             continue
-        seen.add(key)
         if (d.get("stage") or "new") in ("declining", "mature"):
             continue  # hard veto: we missed the window
         vel = d.get("velocity")
@@ -162,6 +204,8 @@ def hot_trends(app: App, limit: int = 5, max_age_hours: int = 6,
         d["metadata"] = db_module.loads(d.get("metadata"), {})
         if d["metadata"].get("safe") is False:
             continue  # hard veto: unclear/ugly origin
+        if d["metadata"].get("fallback"):
+            continue  # canned offline topics must never trigger reactions
         if for_auto_react and d["metadata"].get("sound_dependent"):
             continue  # can't attach native audio via API — manual only
         out.append(d)
@@ -213,7 +257,7 @@ def react(app: App, llm: LLM, product: dict, trend: Optional[dict] = None,
     if trend is None:
         # Hottest qualifying trend we haven't already reacted to (the same
         # topic re-surfaces every poll while it stays hot).
-        trend = next((t for t in hot_trends(app)
+        trend = next((t for t in hot_trends(app, product_id=product["id"])
                       if not _already_reacted(app, product["id"], t["topic"])), None)
         if trend is None:
             return []
@@ -323,27 +367,38 @@ def _heuristic_relevance(topic: str, product: dict) -> float:
 # Read side
 # --------------------------------------------------------------------------- #
 def recent_trends(app: App, platform: Optional[str] = None, limit: int = 10,
-                  max_age_hours: int = 48) -> list[dict]:
+                  max_age_hours: int = 48,
+                  product_id: Optional[str] = None) -> list[dict]:
+    """Read side for the strategist. Campaign-scoped (a trend's relevance score
+    was computed for ONE campaign), latest sighting per topic (so the stage the
+    strategist sees is current), unsafe origins filtered out."""
+    scope = "AND (product_id = ? OR product_id IS NULL) " if product_id else ""
+    params: list = [f"-{int(max_age_hours)} hours"]
+    if product_id:
+        params.append(product_id)
     rows = db_module.query(
         app.conn,
         "SELECT source, topic, trend_score, metadata, style_notes, velocity, stage, "
-        "collected_at FROM trends WHERE collected_at >= datetime('now', ?) "
-        "ORDER BY trend_score DESC",
-        (f"-{int(max_age_hours)} hours",),
+        f"collected_at FROM trends WHERE collected_at >= datetime('now', ?) {scope}"
+        "ORDER BY collected_at DESC",
+        params,
     )
-    # Dedupe by topic keeping the highest score; lightly boost source match.
-    best: dict[str, dict] = {}
+    # Latest sighting per topic; lightly boost platform-native sources.
+    latest: dict[str, dict] = {}
     for r in rows:
         d = dict(r)
+        latest.setdefault(d["topic"].strip().lower(), d)
+    ranked = []
+    for d in latest.values():
         d["metadata"] = db_module.loads(d.get("metadata"), {})
+        if d["metadata"].get("safe") is False:
+            continue  # tragedy/in-joke/unclear origin never reaches the strategist
         score = d["trend_score"] or 0.0
         if platform == "tiktok" and d["source"] == "tiktok":
             score += 0.05
-        key = d["topic"].strip().lower()
-        if key not in best or score > best[key]["_score"]:
-            d["_score"] = score
-            best[key] = d
-    out = sorted(best.values(), key=lambda x: x["_score"], reverse=True)[:limit]
+        d["_score"] = score
+        ranked.append(d)
+    out = sorted(ranked, key=lambda x: x["_score"], reverse=True)[:limit]
     for d in out:
         d.pop("_score", None)
     return out

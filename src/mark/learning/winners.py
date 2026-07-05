@@ -19,7 +19,7 @@ from ..app import App
 from ..llm import LLM
 
 
-def _performance_rows(app: App, product_id: str) -> list[dict]:
+def _performance_rows(app: App, product_id: str, max_age_days: int) -> list[dict]:
     rows = db_module.query(
         app.conn,
         """
@@ -29,29 +29,52 @@ def _performance_rows(app: App, product_id: str) -> list[dict]:
         JOIN posts p ON p.content_id = c.id
         JOIN metrics m ON m.post_id = p.id
         WHERE c.product_id = ? AND c.status = 'posted'
+          AND p.posted_at >= datetime('now', ?)
           AND m.id = (SELECT m2.id FROM metrics m2 WHERE m2.post_id = p.id
                       ORDER BY m2.collected_at DESC LIMIT 1)
         """,
-        (product_id,),
+        (product_id, f"-{int(max_age_days)} days"),
     )
     return [dict(r) for r in rows]
 
 
 def refresh_winners(app: App, llm: LLM, product: dict, top_pct: float = 0.2,
                     max_age_days: int = 90) -> list[dict]:
-    rows = _performance_rows(app, product["id"])
-    if not rows:
-        return []
-    rows.sort(key=lambda r: r["engagement_rate"] or 0.0, reverse=True)
-    k = max(1, math.ceil(len(rows) * top_pct))
-    top = rows[:k]
+    """Rebuild the winner set as the per-platform top `top_pct` of posts from the
+    trailing `max_age_days` window.
+
+    Per-platform, because a pooled top-20% hands every slot to the highest-rate
+    platform and leaves X/LinkedIn with zero examples. Windowed at the source
+    (posted_at), because pruning by added_at just re-inserted all-time hits on
+    the next refresh — freezing the index on old taste forever.
+    """
+    rows = _performance_rows(app, product["id"], max_age_days)
+    desired: dict[int, dict] = {}
+    by_platform: dict[str, list[dict]] = {}
+    for r in rows:
+        by_platform.setdefault(r["platform"], []).append(r)
+    for platform_rows in by_platform.values():
+        platform_rows.sort(key=lambda r: r["engagement_rate"] or 0.0, reverse=True)
+        k = max(1, math.ceil(len(platform_rows) * top_pct))
+        for w in platform_rows[:k]:
+            desired[w["content_id"]] = w
 
     existing = {r["content_id"] for r in db_module.query(
-        app.conn, "SELECT content_id FROM winners")}
+        app.conn,
+        "SELECT w.content_id FROM winners w JOIN content c ON c.id = w.content_id "
+        "WHERE c.product_id = ?", (product["id"],))}
+
+    # Drop winners that fell out of the window or out of the top set.
+    stale = existing - set(desired)
+    if stale:
+        db_module.execute(
+            app.conn,
+            f"DELETE FROM winners WHERE content_id IN ({','.join('?' * len(stale))})",
+            list(stale))
 
     inserted = []
-    for w in top:
-        if w["content_id"] in existing:
+    for content_id, w in desired.items():
+        if content_id in existing:
             continue
         text = f"{w['hook'] or ''}\n{w['caption'] or ''}".strip()
         vec = llm.embed_one(text, product_id=product["id"])
@@ -62,13 +85,6 @@ def refresh_winners(app: App, llm: LLM, product: dict, top_pct: float = 0.2,
             engagement_rate=w["engagement_rate"] or 0.0, embedding=vectors.to_blob(vec),
         )
         inserted.append(w)
-
-    # Prune stale winners.
-    db_module.execute(
-        app.conn,
-        "DELETE FROM winners WHERE added_at < datetime('now', ?)",
-        (f"-{int(max_age_days)} days",),
-    )
     return inserted
 
 

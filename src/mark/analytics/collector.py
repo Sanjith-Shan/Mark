@@ -29,7 +29,10 @@ _PLATFORM_LIKE_RATE = {
 
 def collect(app: App, product_id: Optional[str] = None,
             days: Optional[int] = None) -> list[dict]:
-    posts = store.list_posts(app.conn, product_id=product_id, since_days=days)
+    # Metrics stabilize within weeks; polling every post ever made forever
+    # burns API quota for nothing. 45 days covers reward maturity + baselines.
+    posts = store.list_posts(app.conn, product_id=product_id,
+                             since_days=days if days is not None else 45)
     client = UploadPostClient(app)
     out = []
     for post in posts:
@@ -45,6 +48,13 @@ def collect(app: App, product_id: Optional[str] = None,
             except Exception as exc:  # one bad post must not abort the sweep
                 log.warning("analytics fetch failed for post %s (request_id=%s): %s",
                             post["id"], rid, exc)
+                continue
+            if not any(m.values()):
+                # All-zero almost always means the response shape wasn't
+                # recognized (or analytics aren't ready). Storing it would
+                # poison rewards/winners/calibration with a fake flop.
+                log.warning("analytics for post %s returned all zeros; skipping row",
+                            post["id"])
                 continue
         m["engagement_rate"] = _engagement_rate(m)
         db_module.insert(app.conn, "metrics", post_id=post["id"], **m)
@@ -118,18 +128,65 @@ def _engagement_rate(m: dict) -> float:
     return round(interactions / views, 5)
 
 
+# Which content attributes the simulated audience has opinions about.
+_TASTE_ARMS = ("hook_style", "tone", "strategy", "humor_mechanism",
+               "humor_persona", "emotional_target")
+
+
+def _taste_multiplier(app: App, post: dict) -> float:
+    """Hidden ground-truth audience preference for the offline world.
+
+    The old synthesizer was content-blind — engagement was pure noise, so the
+    learning loop had nothing real to converge on and no convergence proof was
+    possible. Now every mock post's engagement depends on WHAT it was (hook
+    style, tone, strategy, persona, emotion), via:
+
+      1. a planted taste profile in meta key ``mock_taste`` (JSON of
+         ``{"platform:arm_type:value": mult}`` or ``{"arm_type:value": mult}``)
+         — used by the evolution-proof harness to plant known preferences and
+         then SHIFT them mid-run;
+      2. otherwise a deterministic hidden taste derived by hashing
+         (product, platform, arm, value) into [0.8, 1.25] — stable, invisible
+         to the generator, and discoverable only by experimenting.
+    """
+    import hashlib
+
+    content = db_module.query_one(
+        app.conn, "SELECT product_id, strategy_context, content_type FROM content WHERE id = ?",
+        (post["content_id"],))
+    if not content:
+        return 1.0
+    sctx = db_module.loads(content["strategy_context"], {}) or {}
+    platform = post["platform"]
+    profile = db_module.loads(db_module.get_meta(app.conn, "mock_taste"), None) or {}
+    mult = 1.0
+    for arm_type in _TASTE_ARMS:
+        value = sctx.get(arm_type)
+        if not value:
+            continue
+        planted = profile.get(f"{platform}:{arm_type}:{value}", profile.get(f"{arm_type}:{value}"))
+        if planted is not None:
+            mult *= float(planted)
+            continue
+        seed_src = f"{content['product_id']}|{platform}|{arm_type}|{value}"
+        h = int.from_bytes(hashlib.sha256(seed_src.encode()).digest()[:8], "big")
+        mult *= 0.8 + (h % 10_000) / 10_000 * 0.45  # uniform [0.8, 1.25]
+    return mult
+
+
 def _mock_metrics(app: App, post: dict) -> dict:
     prior = db_module.query_one(
         app.conn, "SELECT COUNT(*) AS n FROM metrics WHERE post_id = ?", (post["id"],))
     growth = (prior["n"] if prior else 0) + 1
     rng = random.Random(post["id"] * 100 + growth)
+    taste = _taste_multiplier(app, post)
     views = int(rng.uniform(500, 6000) * growth)
     lo, hi = _PLATFORM_LIKE_RATE.get(post["platform"], (0.03, 0.08))
-    likes = int(views * rng.uniform(lo, hi))
+    likes = int(views * rng.uniform(lo, hi) * taste)
     comments = int(likes * rng.uniform(0.03, 0.12))
     shares = int(likes * rng.uniform(0.02, 0.10))
     saves = int(likes * rng.uniform(0.05, 0.25))
-    clicks = int(views * rng.uniform(0.005, 0.03))
+    clicks = int(views * rng.uniform(0.005, 0.03) * taste)
     return {"views": views, "likes": likes, "comments": comments,
             "shares": shares, "saves": saves, "clicks": clicks}
 

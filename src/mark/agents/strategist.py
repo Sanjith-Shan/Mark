@@ -55,15 +55,25 @@ def plan_content(
     )
 
     # Guardrails: keep the chosen type within what the platform allows, and force
-    # the platform to match what we asked for. Honor bandit picks when present.
+    # the platform to match what we asked for.
     if plan.content_type not in allowed:
         plan.content_type = bandit_picks.get("content_type", allowed[0])
         if plan.content_type not in allowed:
             plan.content_type = allowed[0]
     plan.platform = platform
-    if bandit_picks.get("hook_style"):
+    # The bandit's sampled hook/tone override the strategist only half the time.
+    # 100% override destroyed context-sensitivity (the strategist may know THIS
+    # topic wants a story hook); 0% would starve the arms of on-policy pulls.
+    # Either way the used values are what get credited when metrics arrive.
+    import random
+
+    row = db_module.query_one(
+        app.conn, "SELECT COUNT(*) AS n FROM content WHERE product_id = ? AND platform = ?",
+        (product["id"], platform))
+    rng = random.Random(f"{product['id']}:{platform}:{row['n'] if row else 0}:override")
+    if bandit_picks.get("hook_style") and rng.random() < 0.5:
         plan.hook_style = bandit_picks["hook_style"]
-    if bandit_picks.get("tone"):
+    if bandit_picks.get("tone") and rng.random() < 0.5:
         plan.tone = bandit_picks["tone"]
     # One primary emotion per post. The strategy's target is the default; the
     # strategist may pick another valid one; the bandit fills any gap.

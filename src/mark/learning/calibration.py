@@ -17,18 +17,24 @@ from ..app import App
 # this engagement multiple (small gaps are noise, not taste).
 MIN_DIVERGENCE = 2.0
 
+# Posts with fewer views than this are too noisy to be preference evidence —
+# a 3-view post with one like "beats" a 500-view post on rate alone.
+MIN_VIEWS = 100
+
 
 def preference_pairs(app: App, product_id: str, platform: str,
                      limit: int = 3, days: int = 90) -> list[dict]:
     """Mine (winner, loser) post pairs from this account's own engagement.
 
-    Same platform + content type, both measured, engagement divergence ≥ 2x.
-    Most-divergent and most-recent pairs first.
+    Same platform + content type + strategy (controls the topic-luck confound),
+    both measured with enough views, engagement divergence ≥ 2x.
+    Most-divergent pairs first.
     """
     rows = db_module.query(
         app.conn,
         """
-        SELECT c.id, c.hook, c.caption, c.content_type, m.engagement_rate
+        SELECT c.id, c.hook, c.caption, c.content_type, c.strategy_context,
+               m.engagement_rate, m.views
         FROM content c
         JOIN posts p ON p.content_id = c.id
         JOIN metrics m ON m.post_id = p.id
@@ -40,13 +46,16 @@ def preference_pairs(app: App, product_id: str, platform: str,
         """,
         (product_id, platform, f"-{int(days)} days"),
     )
-    posts = [dict(r) for r in rows if (r["caption"] or "").strip()]
+    posts = [dict(r) for r in rows
+             if (r["caption"] or "").strip() and (r["views"] or 0) >= MIN_VIEWS]
     pairs = []
     seen: set[int] = set()
-    # Pair each post with the most-divergent same-type partner not yet used.
-    by_type: dict[str, list[dict]] = {}
+    # Pair each post with the most-divergent same-type+strategy partner not yet
+    # used (same strategy = the pair differs in execution, not in topic luck).
+    by_type: dict[tuple, list[dict]] = {}
     for p in posts:
-        by_type.setdefault(p["content_type"], []).append(p)
+        sctx = db_module.loads(p.get("strategy_context"), {}) or {}
+        by_type.setdefault((p["content_type"], sctx.get("strategy")), []).append(p)
     for group in by_type.values():
         group.sort(key=lambda p: p["engagement_rate"] or 0.0, reverse=True)
         i, j = 0, len(group) - 1

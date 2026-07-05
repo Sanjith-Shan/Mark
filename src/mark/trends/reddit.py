@@ -40,6 +40,56 @@ def fetch(app: App, subreddits: list[str] | None = None, limit: int = 20) -> lis
              "metadata": {"fallback": True}} for t, s in _FALLBACK[:limit]]
 
 
+SEARCH_URL = "https://www.reddit.com/search.json"
+
+
+def fetch_search(app: App, keywords: list[str], limit: int = 15) -> list[dict]:
+    """Keyword search across all of Reddit (hot, past day) — the per-campaign
+    theming lever for campaigns whose niche has no obvious home subreddits.
+    Returns [] when no keywords are configured; never uses canned fallbacks."""
+    if not keywords:
+        return []
+    if app.force_mock:
+        return []
+    try:
+        import httpx
+
+        headers = {"User-Agent": "mark-trends/1.0 (personal marketing tool)"}
+        out = []
+        per_kw = max(3, limit // max(len(keywords), 1))
+        with httpx.Client(timeout=12, follow_redirects=True) as client:
+            for kw in keywords[:6]:
+                try:
+                    resp = client.get(SEARCH_URL, headers=headers,
+                                      params={"q": kw, "sort": "hot", "t": "day",
+                                              "limit": str(per_kw)})
+                    resp.raise_for_status()
+                    children = (resp.json().get("data") or {}).get("children") or []
+                except Exception:
+                    continue
+                for child in children:
+                    d = child.get("data") or {}
+                    title = (d.get("title") or "").strip()
+                    if not title or d.get("stickied") or d.get("over_18"):
+                        continue
+                    ups = int(d.get("ups") or 0)
+                    created = d.get("created_utc") or (time.time() - 3600)
+                    age_h = max(time.time() - created, 600) / 3600
+                    score = min(100.0, (ups / age_h) * 2.0)
+                    out.append({
+                        "source": "reddit",
+                        "topic": title[:140],
+                        "raw_score": round(score, 1),
+                        "metadata": {"keyword": kw, "ups": ups,
+                                     "subreddit": d.get("subreddit"),
+                                     "permalink": f"https://reddit.com{d.get('permalink', '')}"},
+                    })
+        out.sort(key=lambda x: x["raw_score"], reverse=True)
+        return out[:limit]
+    except Exception:
+        return []
+
+
 def _fetch_live(subs: list[str], limit: int) -> list[dict] | None:
     try:
         import httpx
