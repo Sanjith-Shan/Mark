@@ -603,9 +603,11 @@ def register(strategies: list[Strategy]) -> None:
 # Eligibility + selection
 # --------------------------------------------------------------------------- #
 def product_allowlist(product: dict) -> Optional[list[str]]:
-    """The product's optional strategy allowlist (JSON column / YAML key)."""
+    """The product's optional strategy allowlist (JSON column / YAML key).
+    None = no restriction (all strategies). An explicit empty list means
+    "all disabled" and is honored as such — never coerced to None."""
     allowed = db_module.loads(product.get("strategies"), None)
-    return allowed if allowed else None
+    return allowed if isinstance(allowed, list) else None
 
 
 def eligible(app: App, product: dict, platform: str) -> list[Strategy]:
@@ -617,7 +619,7 @@ def eligible(app: App, product: dict, platform: str) -> list[Strategy]:
     for s in STRATEGIES:
         if not s.fits(platform):
             continue
-        if allowlist and s.id not in allowlist:
+        if allowlist is not None and s.id not in allowlist:
             continue
         if not any(t in allowed_types for t in s.content_types):
             continue

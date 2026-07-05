@@ -222,21 +222,34 @@ def approve(ctx: typer.Context,
     """Approve content for posting."""
     from datetime import datetime, timezone
 
+    from . import characters as characters_mod
+
     a = _app(ctx)
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+    def _approve_row(row: dict) -> None:
+        already = row["status"] == "approved"
+        store.set_content_status(a.conn, row["id"], "approved", approved_at=now)
+        if not already:  # character lore advances on FIRST approval only
+            try:
+                characters_mod.on_content_approved(a, row)
+            except Exception:
+                pass
+
     if all_drafts:
         rows = store.list_content(a.conn, status="draft", limit=1000)
         for r in rows:
-            store.set_content_status(a.conn, r["id"], "approved", approved_at=now)
+            _approve_row(r)
         console.print(f"[green]Approved {len(rows)} draft(s).[/]")
         return
     if content_id is None:
         console.print("[red]Provide a content id or --all.[/]")
         raise typer.Exit(code=1)
-    if not store.get_content(a.conn, content_id):
+    row = store.get_content(a.conn, content_id)
+    if not row:
         console.print(f"[red]No content with id {content_id}.[/]")
         raise typer.Exit(code=1)
-    store.set_content_status(a.conn, content_id, "approved", approved_at=now)
+    _approve_row(row)
     console.print(f"[green]Approved content {content_id}.[/]")
 
 

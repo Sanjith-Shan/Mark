@@ -319,19 +319,20 @@ def build_router(rt: Runtime) -> APIRouter:
 
         app = rt.app()
         row = get_content_or_404(content_id)
+        already_approved = row["status"] == "approved"
         store.set_content_status(
             app.conn, content_id, "approved",
             approved_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"))
         db_module.log_activity(app.conn, "approve", f"Approved content #{content_id}",
                                product_id=row["product_id"], content_id=content_id,
                                level="success")
-        # Character episodes advance the lore on approval.
-        sctx = db_module.loads(row.get("strategy_context"), {}) or {}
-        if sctx.get("character_id"):
+        # Character episodes advance the lore on FIRST approval only — a
+        # double-click/retry must not drift the running counters.
+        if not already_approved:
             from .. import characters as characters_mod
 
             try:
-                characters_mod.on_episode_approved(app, sctx["character_id"])
+                characters_mod.on_content_approved(app, row)
             except Exception:
                 pass
         rt.bus.publish("content", {"id": content_id, "status": "approved"})
@@ -676,8 +677,9 @@ def build_router(rt: Runtime) -> APIRouter:
             unknown = [s for s in body.strategies if not strategies_mod.get(s)]
             if unknown:
                 raise HTTPException(400, f"unknown strategies: {', '.join(unknown)}")
-        store.update_product(app.conn, product_id,
-                             strategies=body.strategies if body.strategies else None)
+        # null = all enabled; [] = all disabled (stored as an explicit empty
+        # list — a falsy check here would silently invert the request).
+        store.update_product(app.conn, product_id, strategies=body.strategies)
         db_module.log_activity(app.conn, "edit",
                                "Updated strategy allowlist", product_id=product_id)
         return product_out(get_product_or_404(product_id))

@@ -364,8 +364,23 @@ def adapt_content(app: App, llm: LLM, source_content_id: int,
                                  user_feedback=[instruction],
                                  strategy=strategy, character=character)
 
+    # Novelty guard, same as generate_one — "re-express natively" is a prompt
+    # wish, not a guarantee, and a near-duplicate must never reach a platform.
+    novelty = check_novelty(app, llm, product, target_platform, draft)
+    if not novelty.ok:
+        draft = writer.write_content(app, llm, product, target_platform, plan,
+                                     user_feedback=[instruction],
+                                     novelty_similar=novelty.similar_caption,
+                                     strategy=strategy, character=character)
+        novelty = check_novelty(app, llm, product, target_platform, draft)
+
+    # Record what THIS draft actually used — copying the source's humor fields
+    # would credit the wrong bandit arms when metrics arrive.
     new_sctx = {**sctx, "cascaded_from": source_content_id,
-                "cascade_source_platform": source["platform"]}
+                "cascade_source_platform": source["platform"],
+                "humor_mechanism": draft.humor_mechanism,
+                "humor_persona": draft.humor_persona,
+                "novelty_max_sim": round(novelty.max_sim, 4)}
     content_id = store.insert_content(
         app.conn, product_id=product["id"], platform=target_platform,
         content_type=plan.content_type, caption=draft.caption,

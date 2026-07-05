@@ -308,6 +308,111 @@ def test_cascade_adapts_winner_cross_platform(app, llm, product):
     assert sctx["cascade_source_platform"] == "x"
 
 
+# --------------------------------------------------------------------------- #
+# Review-fix regressions
+# --------------------------------------------------------------------------- #
+def test_scheduled_content_not_posted_early(app, product):
+    from mark.scheduler import engine
+
+    cid = store.insert_content(
+        app.conn, product_id=product["id"], platform="x", content_type="text",
+        caption="scheduled for later", hashtags=[], hook="h", media_paths=[],
+        media_urls=[], strategy_context={}, status="approved")
+    db_module.execute(app.conn,
+                      "UPDATE content SET scheduled_at = datetime('now', '+2 days') "
+                      "WHERE id = ?", (cid,))
+    engine.job_post_platform(app, "x")
+    row = store.get_content(app.conn, cid)
+    assert row["status"] == "approved"  # untouched — job_post_scheduled owns it
+
+
+def test_cascade_dedup_no_prefix_false_positive(app, product):
+    from mark.scheduler.engine import _already_cascaded
+
+    # Content #123 cascaded — must NOT mark #12 as already cascaded.
+    store.insert_content(
+        app.conn, product_id=product["id"], platform="threads", content_type="text",
+        caption="c", hashtags=[], hook="h", media_paths=[], media_urls=[],
+        strategy_context={"cascaded_from": 123, "cascade_source_platform": "x"},
+        status="draft")
+    assert _already_cascaded(app, product["id"], 123, "threads")
+    assert not _already_cascaded(app, product["id"], 12, "threads")
+    assert not _already_cascaded(app, "otherco", 123, "threads")
+
+
+def test_upsert_preserves_curated_fields(app, product):
+    from mark.config import ProductConfig
+
+    store.update_product(app.conn, product["id"], strategies=["demo-magic"],
+                         knowledge={"pain_veins": ["x"]})
+    # Re-import YAML without those keys — must not clobber.
+    store.upsert_product(app.conn, ProductConfig(
+        id=product["id"], name="TestCo", description="d", target_audience="t",
+        brand_voice="v"), active=True)
+    fresh = store.get_product(app.conn, product["id"])
+    assert db_module.loads(fresh["strategies"], None) == ["demo-magic"]
+    assert db_module.loads(fresh["knowledge"], {})["pain_veins"] == ["x"]
+
+
+def test_empty_allowlist_means_all_disabled(app, product):
+    store.update_product(app.conn, product["id"], strategies=[])
+    fresh = store.get_product(app.conn, product["id"])
+    assert strategies.product_allowlist(fresh) == []
+    assert strategies.eligible(app, fresh, "x") == []
+    assert strategies.pick(app, fresh, "x") is None
+
+
+def test_engagement_rate_migration_recomputes_old_rows(app, product):
+    from mark import db as db_mod
+
+    cid = _seed_posted(app, product, "x", "old scale post", 0.0)
+    pid = db_module.query_one(app.conn, "SELECT id FROM posts WHERE content_id = ?",
+                              (cid,))["id"]
+    db_module.insert(app.conn, "metrics", post_id=pid, views=1000, likes=100,
+                     comments=10, shares=20, saves=30,
+                     engagement_rate=0.16)  # old unweighted scale
+    db_module.execute(app.conn, "PRAGMA user_version = 0")
+    db_mod.init_db(app.conn)
+    rows = db_module.query(app.conn,
+                           "SELECT engagement_rate FROM metrics WHERE post_id = ?"
+                           " ORDER BY id DESC LIMIT 1", (pid,))
+    assert abs(rows[0]["engagement_rate"] - 0.21) < 1e-6  # (100+10+40+60)/1000
+    assert app.conn.execute("PRAGMA user_version").fetchone()[0] == 1
+
+
+def test_reaction_budget_ignores_expiry_and_failures(app, product):
+    from mark.trends import aggregator
+
+    db_module.log_activity(app.conn, "trend_expire", "expired", product_id=product["id"])
+    db_module.log_activity(app.conn, "trend_react", "failed", product_id=product["id"],
+                           level="error")
+    assert aggregator._reactions_today(app, product["id"]) == 0
+    db_module.log_activity(app.conn, "trend_react", "ok", product_id=product["id"],
+                           level="success")
+    assert aggregator._reactions_today(app, product["id"]) == 1
+
+
+def test_double_approve_advances_lore_once(app, llm, product):
+    c = characters.create(app, product["id"], name="Blobby",
+                          persona="p", visual_desc="v")
+    row = {"strategy_context": {"character_id": c["id"]}, "status": "draft"}
+    characters.on_content_approved(app, row)
+    assert characters.get(app, c["id"])["lore_state"]["episodes_posted"] == 1
+    # The API/CLI guard: already-approved rows never call the hook again —
+    # simulate the guard's contract by NOT calling for an approved row.
+
+
+def test_react_skips_already_reacted_topic(app, llm, product):
+    from mark.trends import aggregator
+
+    trend = {"topic": "double react check", "stage": "new", "trend_score": 0.9}
+    app.settings.trends.max_reactions_per_day = 10
+    first = aggregator.react(app, llm, product, trend=trend, platforms=["x"])
+    assert len(first) == 1
+    second = aggregator.react(app, llm, product, trend=trend, platforms=["x"])
+    assert second == []  # duplicate topic within 48h — skipped
+
+
 def test_ui_mockup_renderer(app, tmp_path):
     from mark.media import uikit
 

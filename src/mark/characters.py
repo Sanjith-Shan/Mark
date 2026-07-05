@@ -163,6 +163,14 @@ def scene_prompt(character: dict, scene: str) -> str:
             f"identical face, hair and outfit. Scene: {scene}")
 
 
+def on_content_approved(app: App, content_row: dict) -> None:
+    """Shared approval hook (web + CLI): advance lore when character-fronted
+    content is approved. Callers must guard against re-approval themselves."""
+    sctx = db_module.loads(content_row.get("strategy_context"), {}) or {}
+    if sctx.get("character_id"):
+        on_episode_approved(app, sctx["character_id"])
+
+
 def on_episode_approved(app: App, character_id: int) -> None:
     """Advance the character's lore when an episode is approved — the universe
     must move forward or callbacks have nothing to call back to."""

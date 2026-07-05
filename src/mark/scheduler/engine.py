@@ -70,10 +70,14 @@ def job_post_platform(app: App, platform: str) -> None:
         return
     # Rotate across running campaigns fairly: pick the campaign that has posted
     # least recently on this platform, oldest approved draft first.
+    # scheduled_at IS NULL: user-scheduled content belongs exclusively to
+    # job_post_scheduled — otherwise it would post early at the next optimal
+    # slot (and could double-post via a race between the two jobs).
     row = db_module.query_one(
         app.conn,
         "SELECT c.* FROM content c JOIN products pr ON pr.id = c.product_id "
         "WHERE c.status = 'approved' AND c.platform = ? "
+        "AND c.scheduled_at IS NULL "
         "AND (c.expires_at IS NULL OR c.expires_at > datetime('now')) "
         "AND pr.active = 1 AND COALESCE(pr.archived, 0) = 0 "
         "ORDER BY c.created_at ASC LIMIT 1", (platform,))
@@ -153,6 +157,23 @@ def job_post_scheduled(app: App) -> None:
 CASCADE_LADDER = {"tiktok": ["instagram", "youtube"], "x": ["threads"]}
 
 
+def _already_cascaded(app: App, product_id: str, source_id: int, target: str) -> bool:
+    """True if this winner already has an adaptation on the target platform.
+    Candidates are narrowed with LIKE, then confirmed by decoding the JSON —
+    a bare substring match would prefix-match larger ids (12 vs 123) and
+    other campaigns' content."""
+    rows = db_module.query(
+        app.conn,
+        "SELECT strategy_context FROM content WHERE product_id = ? AND platform = ? "
+        "AND strategy_context LIKE '%cascaded_from%'",
+        (product_id, target))
+    for r in rows:
+        sctx = db_module.loads(r["strategy_context"], {}) or {}
+        if sctx.get("cascaded_from") == source_id:
+            return True
+    return False
+
+
 def job_cascade(app: App, llm: LLM) -> None:
     """Daily: find posts from 2-5 days ago that beat their platform baseline by
     ≥1.5x and re-express them natively on the ladder's lagged platforms."""
@@ -186,13 +207,7 @@ def job_cascade(app: App, llm: LLM) -> None:
                 for target in targets:
                     if not app.settings.platform(target).enabled:
                         continue
-                    # Skip when this winner already cascaded to this target.
-                    dup = db_module.query_one(
-                        app.conn,
-                        "SELECT id FROM content WHERE platform = ? "
-                        "AND strategy_context LIKE ?",
-                        (target, f'%"cascaded_from": {row["id"]}%'))
-                    if dup:
+                    if _already_cascaded(app, product["id"], row["id"], target):
                         continue
                     _safe(pipeline.adapt_content, app, llm, row["id"], target)
     log.info("cascade pass done")

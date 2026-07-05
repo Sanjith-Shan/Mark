@@ -238,7 +238,23 @@ def init_db(conn: sqlite3.Connection) -> None:
         cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
         if column not in cols:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+    _data_migrations(conn)
     conn.commit()
+
+
+def _data_migrations(conn: sqlite3.Connection) -> None:
+    """One-time data migrations, tracked via PRAGMA user_version."""
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
+    if version < 1:
+        # v1: engagement_rate formula changed (shares/saves weighted 2x).
+        # Recompute historical rows from their stored raw components so every
+        # consumer (cascade baselines, winners, bandit rewards) compares rates
+        # on ONE scale — mixing scales silently mislabels winners.
+        conn.execute(
+            "UPDATE metrics SET engagement_rate = ROUND("
+            "  (likes + comments + 2.0 * shares + 2.0 * saves)"
+            "  / MAX(views, 1), 5)")
+        conn.execute("PRAGMA user_version = 1")
 
 
 def log_activity(conn: sqlite3.Connection, kind: str, message: str,

@@ -171,13 +171,33 @@ def hot_trends(app: App, limit: int = 5, max_age_hours: int = 6,
 
 
 def _reactions_today(app: App, product_id: str) -> int:
+    # Only SUCCESSFUL reactions consume budget — expiries and failures logging
+    # under related kinds must never starve the day's real reactions.
     row = db_module.query_one(
         app.conn,
         "SELECT COUNT(*) AS n FROM activity WHERE kind = 'trend_react' "
-        "AND product_id = ? AND date(created_at) = date('now')",
+        "AND level = 'success' AND product_id = ? AND date(created_at) = date('now')",
         (product_id,),
     )
     return row["n"] if row else 0
+
+
+def _already_reacted(app: App, product_id: str, topic: str,
+                     within_hours: int = 48) -> bool:
+    """True if content was already generated for this trend topic recently —
+    the same topic re-surfaces on every fast poll and must not spawn
+    duplicates. Candidates narrowed by LIKE, confirmed by JSON decode."""
+    rows = db_module.query(
+        app.conn,
+        "SELECT strategy_context FROM content WHERE product_id = ? "
+        "AND created_at >= datetime('now', ?) AND strategy_context LIKE '%forced_trend%'",
+        (product_id, f"-{int(within_hours)} hours"))
+    want = topic.strip().lower()
+    for r in rows:
+        sctx = db_module.loads(r["strategy_context"], {}) or {}
+        if (sctx.get("forced_trend") or "").strip().lower() == want:
+            return True
+    return False
 
 
 def react(app: App, llm: LLM, product: dict, trend: Optional[dict] = None,
@@ -191,10 +211,14 @@ def react(app: App, llm: LLM, product: dict, trend: Optional[dict] = None,
 
     cfg = app.settings.trends
     if trend is None:
-        hot = hot_trends(app)
-        if not hot:
+        # Hottest qualifying trend we haven't already reacted to (the same
+        # topic re-surfaces every poll while it stays hot).
+        trend = next((t for t in hot_trends(app)
+                      if not _already_reacted(app, product["id"], t["topic"])), None)
+        if trend is None:
             return []
-        trend = hot[0]
+    elif _already_reacted(app, product["id"], trend["topic"]):
+        return []
 
     if platforms is None:
         enabled = [p for p in pipeline.product_platforms(product)
@@ -245,7 +269,7 @@ def expire_stale_content(app: App) -> int:
             "UPDATE content SET status = 'rejected', "
             "rejection_feedback = 'auto-expired: trend window closed' WHERE id = ?",
             (r["id"],))
-        db_module.log_activity(app.conn, "trend_react",
+        db_module.log_activity(app.conn, "trend_expire",
                                f"Expired stale trend content #{r['id']} (window closed)",
                                product_id=r["product_id"], content_id=r["id"])
     return len(rows)

@@ -28,8 +28,12 @@ def upsert_product(conn: sqlite3.Connection, p: ProductConfig, active: bool = Tr
             name=excluded.name, description=excluded.description,
             target_audience=excluded.target_audience, brand_voice=excluded.brand_voice,
             website_url=excluded.website_url, platforms=excluded.platforms,
-            posting_cadence=excluded.posting_cadence, strategies=excluded.strategies,
-            specificity_bank=excluded.specificity_bank, knowledge=excluded.knowledge
+            posting_cadence=excluded.posting_cadence,
+            -- COALESCE: a YAML re-import without these keys must not clobber
+            -- allowlists/pools curated through the app (Playbook page etc.).
+            strategies=COALESCE(excluded.strategies, products.strategies),
+            specificity_bank=COALESCE(excluded.specificity_bank, products.specificity_bank),
+            knowledge=COALESCE(excluded.knowledge, products.knowledge)
         """,
         (p.id, p.name, p.description, p.target_audience, p.brand_voice,
          p.website_url, db_module._encode(p.platforms),
