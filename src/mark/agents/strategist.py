@@ -28,6 +28,7 @@ def plan_content(
     strategy=None,
     episode: int = 1,
     forced_trend: Optional[dict] = None,
+    character_comments: Optional[list[str]] = None,
 ) -> ContentPlan:
     trends = trends or []
     winners = winners or []
@@ -41,7 +42,8 @@ def plan_content(
 
     system = prompts.strategist_system(product, platform, trends, winners, bandit_picks,
                                        allowed, strategy=strategy, episode=episode,
-                                       forced_trend=forced_trend)
+                                       forced_trend=forced_trend,
+                                       character_comments=character_comments)
     user = prompts.strategist_user(platform)
 
     plan = llm.parse(

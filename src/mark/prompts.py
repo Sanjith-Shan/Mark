@@ -233,10 +233,17 @@ For video scripts: include a brief on-screen disclosure line in the first second
 def strategist_system(product: dict, platform: str, trends: list[dict],
                       winners: list[dict], bandit_picks: dict,
                       allowed_types: list[str], strategy=None, episode: int = 1,
-                      forced_trend: Optional[dict] = None) -> str:
+                      forced_trend: Optional[dict] = None,
+                      character_comments: Optional[list[str]] = None) -> str:
     strat = strategy_block(strategy, platform, episode)
     strat_brief = f"\nSTRATEGY BRIEF: {strategy.strategist_brief}" if strategy and strategy.strategist_brief else ""
     knowledge = knowledge_block(product, strategy)
+    mined = ""
+    if character_comments:
+        listing = "\n".join(f"- {c[:140]}" for c in character_comments[:8])
+        mined = ("\nAUDIENCE COMMENTS ON RECENT EPISODES (mine these for canon — "
+                 "what the audience jokes about becomes lore; community "
+                 "co-authorship converts commenters into superfans):\n" + listing)
     forced = ""
     if forced_trend:
         style = (forced_trend.get("style_notes") or "").strip()
@@ -247,7 +254,7 @@ def strategist_system(product: dict, platform: str, trends: list[dict],
                   "product to the caption."
                   + (f"\nHOW CREATORS ARE EXECUTING IT: {style}" if style else ""))
     return f"""You are a world-class social media strategist for {product['name']}.
-{strat}{strat_brief}{knowledge}{forced}
+{strat}{strat_brief}{knowledge}{mined}{forced}
 
 PRODUCT: {product['description']}
 TARGET AUDIENCE: {product['target_audience']}

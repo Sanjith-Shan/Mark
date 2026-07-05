@@ -158,16 +158,24 @@ def generate_one(app: App, llm: LLM, product: dict, platform: str,
     strategy = strategies_mod.pick(app, product, platform, bandit_choice=bandit_strategy)
     episode = strategies_mod.episode_number(app, product, platform, strategy) if strategy else 1
     character = characters_mod.resolve_for_content(app, product, strategy)
+    character_comments: list[str] = []
     if character:
         try:
             characters_mod.ensure_reference_image(app, llm, character)
         except Exception:
             pass  # media falls back to unconditioned generation
+        try:
+            # The comment-mining loop: what the audience says about recent
+            # episodes becomes next-episode material (community co-authorship).
+            character_comments = characters_mod.recent_comments(app, character["id"])
+        except Exception:
+            character_comments = []
 
     plan = strategist.plan_content(
         app, llm, product, platform,
         trends=ctx["trends"], winners=ctx["winners"], bandit_picks=ctx["bandit_picks"],
         strategy=strategy, episode=episode, forced_trend=forced_trend,
+        character_comments=character_comments,
     )
     if forced_trend and not plan.trend_tie_in:
         plan.trend_tie_in = forced_trend.get("topic")

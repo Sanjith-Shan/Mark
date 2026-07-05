@@ -5,8 +5,8 @@ import {
 } from "recharts";
 import { api } from "../api";
 import { useGlobal } from "../store";
-import { CommentRow, PLATFORM_COLORS, PLATFORM_LABELS, SeriesPoint } from "../types";
-import { Card, Empty, Pill, PlatformChip, Stat, fmt, pct } from "../components/ui";
+import { CommentRow, PLATFORM_COLORS, PLATFORM_LABELS, ReplyRow, SeriesPoint } from "../types";
+import { Card, Empty, Pill, PlatformChip, Stat, fmt, pct, timeAgo } from "../components/ui";
 
 interface TableRow {
   content_id: number;
@@ -38,11 +38,13 @@ export default function Analytics() {
   const [days, setDays] = useState(30);
   const [data, setData] = useState<AnalyticsResp | null>(null);
   const [comments, setComments] = useState<CommentsResp | null>(null);
+  const [replies, setReplies] = useState<ReplyRow[]>([]);
 
   const load = () => {
     const q = `campaign=${encodeURIComponent(campaign)}`;
     api.get<AnalyticsResp>(`/api/analytics?${q}&days=${days}`).then(setData).catch(() => {});
     api.get<CommentsResp>(`/api/comments?${q}&limit=30`).then(setComments).catch(() => {});
+    api.get<ReplyRow[]>(`/api/replies?${q}&status=draft&limit=50`).then(setReplies).catch(() => {});
   };
   useEffect(() => { load(); }, [campaign, days]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
@@ -159,6 +161,8 @@ export default function Analytics() {
           </table>
         )}
       </Card>
+
+      <RepliesCard replies={replies} campaign={campaign} onChanged={load} />
 
       <Card title="Comments">
         {(comments?.comments ?? []).length === 0 ? (

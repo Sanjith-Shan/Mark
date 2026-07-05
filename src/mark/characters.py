@@ -186,6 +186,35 @@ def on_episode_approved(app: App, character_id: int) -> None:
     db_module.update(app.conn, "characters", character_id, lore_state=lore)
 
 
+def recent_comments(app: App, character_id: int, limit: int = 8) -> list[str]:
+    """Audience comments on this character's recent episodes — mined as canon
+    fuel (the Nutter Butter loop: 'you're all saying it has beef with Workday —
+    it does now'). Top comments become next-episode material."""
+    rows = db_module.query(
+        app.conn,
+        """
+        SELECT cm.comment_text, c.strategy_context FROM comments cm
+        JOIN posts p ON p.id = cm.post_id
+        JOIN content c ON c.id = p.content_id
+        WHERE c.strategy_context LIKE '%character_id%'
+        ORDER BY cm.collected_at DESC LIMIT ?
+        """,
+        (limit * 5,))
+    seen, out = set(), []
+    for r in rows:
+        # Decode-confirm: a bare LIKE on numeric ids prefix-matches (1 vs 12).
+        sctx = db_module.loads(r["strategy_context"], {}) or {}
+        if sctx.get("character_id") != character_id:
+            continue
+        text = (r["comment_text"] or "").strip()
+        if text and text.lower() not in seen:
+            seen.add(text.lower())
+            out.append(text)
+        if len(out) >= limit:
+            break
+    return out
+
+
 def resolve_for_content(app: App, product: dict, strategy) -> Optional[dict]:
     """The character to front this piece of content, if the strategy calls for one."""
     if strategy is None or not getattr(strategy, "uses_character", False):

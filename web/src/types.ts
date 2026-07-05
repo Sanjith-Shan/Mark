@@ -115,6 +115,24 @@ export interface CommentRow {
   product_id?: string;
 }
 
+export interface ReplyRow {
+  id: number;
+  comment_id: number;
+  post_id: number;
+  content_id: number | null;
+  product_id: string;
+  platform: string;
+  reply_text: string;
+  /** 1 = handle personally; backend leaves reply_text empty for these */
+  sensitive: number;
+  status: string; // "draft" | "approved" | "posted" | "skipped"
+  created_at: string;
+  // joined from comments/content
+  comment_text: string;
+  author: string | null;
+  post_hook: string | null;
+}
+
 export interface Job {
   id: string;
   kind: string;
