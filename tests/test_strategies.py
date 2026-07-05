@@ -452,6 +452,24 @@ def test_strategy_renderer_routing(app, llm, product):
         assert any("mockup" in p for p in paths)
 
 
+def test_character_comment_mining(app, llm, product):
+    c = characters.create(app, product["id"], name="Blobby",
+                          persona="p", visual_desc="v")
+    other = characters.create(app, product["id"], name="Other",
+                              persona="p", visual_desc="v")
+    cid = store.insert_content(
+        app.conn, product_id=product["id"], platform="x", content_type="text",
+        caption="ep", hashtags=[], hook="h", media_paths=[], media_urls=[],
+        strategy_context={"character_id": c["id"], "character": "Blobby"},
+        status="posted")
+    pid = db_module.insert(app.conn, "posts", content_id=cid, platform="x")
+    db_module.insert(app.conn, "comments", post_id=pid,
+                     comment_text="blobby definitely has beef with greg", platform="x")
+    mined = characters.recent_comments(app, c["id"])
+    assert mined == ["blobby definitely has beef with greg"]
+    assert characters.recent_comments(app, other["id"]) == []
+
+
 def test_reply_drafting_and_sensitive_gate(app, llm, product):
     from mark import replies
 

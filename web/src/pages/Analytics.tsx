@@ -191,6 +191,117 @@ export default function Analytics() {
   );
 }
 
+/* ---------- drafted comment replies ---------- */
+
+function RepliesCard(props: { replies: ReplyRow[]; campaign: string; onChanged: () => void }) {
+  const { runJob } = useGlobal();
+  const { replies, campaign, onChanged } = props;
+  // Label by platform: keep replies for the same platform together.
+  const sorted = [...replies].sort((a, b) =>
+    a.platform === b.platform ? b.id - a.id : a.platform.localeCompare(b.platform));
+
+  return (
+    <Card
+      title={
+        <span className="row" style={{ gap: 8 }}>
+          Drafted replies
+          {replies.length > 0 && <Pill kind="draft">{replies.length} pending</Pill>}
+        </span>
+      }
+      action={
+        <button className="btn sm"
+          onClick={() => runJob(() => api.post<{ job_id: string }>(
+            `/api/replies/draft?campaign=${encodeURIComponent(campaign)}`))}>
+          💬 Draft replies now
+        </button>
+      }>
+      {sorted.length === 0 ? (
+        <Empty icon="↩️" title="No drafted replies"
+          hint="Hit “Draft replies now” and Mark writes on-voice replies to fresh comments for you to review." />
+      ) : (
+        <div className="stack" style={{ gap: 0 }}>
+          {sorted.map((r, i) => (
+            <ReplyItem key={r.id} reply={r} onChanged={onChanged}
+              last={i === sorted.length - 1} />
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function ReplyItem({ reply: r, onChanged, last }: { reply: ReplyRow; onChanged: () => void; last: boolean }) {
+  const { toast } = useGlobal();
+  const [text, setText] = useState(r.reply_text);
+  const [busy, setBusy] = useState(false);
+  const sensitive = !!r.sensitive;
+
+  const patch = async (body: { reply_text?: string; status?: string }, msg: string) => {
+    setBusy(true);
+    try {
+      await api.patch<ReplyRow>(`/api/replies/${r.id}`, body);
+      toast(msg);
+      onChanged();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Update failed", "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="stack"
+      style={{
+        gap: 8, padding: "12px 0",
+        borderBottom: last ? undefined : "1px solid var(--border)",
+        ...(sensitive ? {
+          borderLeft: "3px solid var(--amber)", paddingLeft: 12,
+          background: "var(--amber-soft)", borderRadius: "var(--radius-sm)",
+          marginBottom: last ? 0 : 8, borderBottom: undefined,
+        } : {}),
+      }}>
+      <div className="row wrap" style={{ alignItems: "flex-start" }}>
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <div className="row wrap" style={{ gap: 8 }}>
+            <PlatformChip platform={r.platform} />
+            {sensitive && <Pill kind="draft">⚠ sensitive — handle personally</Pill>}
+            <span className="faint small">{timeAgo(r.created_at)}</span>
+          </div>
+          <div style={{ fontSize: 13, marginTop: 4 }}>
+            <span style={{ fontWeight: 600 }}>{r.author ?? "anonymous"}</span>
+            <span className="muted"> — {r.comment_text}</span>
+          </div>
+          {r.post_hook && (
+            <div className="small faint" style={{ marginTop: 2 }}>on “{r.post_hook}”</div>
+          )}
+        </div>
+        <div className="row" style={{ gap: 6, flexShrink: 0 }}>
+          <button className="btn success sm" disabled={busy}
+            title="You post the reply yourself in the app — this just records it as done"
+            onClick={() => patch({ status: "posted" }, "Marked posted")}>
+            ✓ Mark posted
+          </button>
+          <button className="btn ghost sm" disabled={busy}
+            onClick={() => patch({ status: "skipped" }, "Skipped")}>
+            Skip
+          </button>
+        </div>
+      </div>
+      {sensitive ? (
+        <div className="small" style={{ color: "var(--amber)" }}>
+          Mark won't draft this one — reply personally, then mark it posted or skip it.
+        </div>
+      ) : (
+        <textarea className="input" rows={2} value={text} placeholder="Drafted reply"
+          onChange={(e) => setText(e.target.value)}
+          onBlur={() => {
+            if (text !== r.reply_text) patch({ reply_text: text }, "Reply saved");
+          }} />
+      )}
+    </div>
+  );
+}
+
 function SentimentPill({ sentiment }: { sentiment: string | null }) {
   if (sentiment === "positive") return <Pill kind="live">positive</Pill>;
   if (sentiment === "negative") return <Pill kind="failed">negative</Pill>;
