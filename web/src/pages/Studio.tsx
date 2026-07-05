@@ -123,7 +123,8 @@ function QueueCard(props: {
       <div className="content-body">
         {c.hook && <div className="content-hook">{c.hook}</div>}
         {c.caption && <div className="content-caption">{c.caption}</div>}
-        {(ctx?.strategy_name || ctx?.character || ctx?.forced_trend || ctx?.emotional_target || c.expires_at) && (
+        {(ctx?.strategy_name || ctx?.character || ctx?.forced_trend || ctx?.emotional_target ||
+          ctx?.policy === "holdout" || c.expires_at) && (
           <div className="row wrap" style={{ gap: 5 }}>
             {ctx?.strategy_name && (
               <Pill kind="accent">{ctx.strategy_name}{ctx.episode ? ` · ep ${ctx.episode}` : ""}</Pill>
@@ -132,6 +133,9 @@ function QueueCard(props: {
             {ctx?.character && <Pill>🎭 {ctx.character}</Pill>}
             {ctx?.forced_trend && (
               <Pill><span title={`trend ride: ${ctx.forced_trend}`}>🏄 trend ride</span></Pill>
+            )}
+            {ctx?.policy === "holdout" && (
+              <Pill><span title="random-policy control post — proves the learning lift">🎲 holdout</span></Pill>
             )}
             <ExpiryChip expiresAt={c.expires_at} />
           </div>
@@ -342,6 +346,9 @@ function Drawer(props: { id: number; initialReject: boolean; onClose: () => void
                 <StatusPill status={detail.status} />
                 <PlatformChip platform={detail.platform} />
                 <Pill>{detail.content_type}</Pill>
+                {ctx?.policy === "holdout" && (
+                  <Pill><span title="random-policy control post — proves the learning lift">🎲 holdout</span></Pill>
+                )}
                 <ExpiryChip expiresAt={detail.expires_at} />
                 <span className="faint small">#{detail.id} · {timeAgo(detail.created_at)}</span>
               </div>

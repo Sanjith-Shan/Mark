@@ -163,7 +163,12 @@ def _persona_lineup(bandit_persona: Optional[str], n: int) -> list[str]:
 def _choose(bandit_value: Optional[str], pool: list[str], seed_text: str) -> str:
     if bandit_value in pool:
         return bandit_value
-    return pool[abs(hash(seed_text)) % len(pool)]
+    # hashlib, not hash(): the builtin is salted per process, which made
+    # mechanism selection (and therefore simulations) non-reproducible.
+    import hashlib
+
+    h = int.from_bytes(hashlib.sha256(seed_text.encode()).digest()[:8], "big")
+    return pool[h % len(pool)]
 
 
 def _fanout(app, llm, product, platform, plan, draft, violation, personas,

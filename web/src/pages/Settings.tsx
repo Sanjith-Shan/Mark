@@ -50,6 +50,12 @@ interface TrendsSettings {
   fast_poll_minutes: number;
   subreddits: string[];
 }
+interface LearningSettings {
+  decay_half_life_days: number;
+  holdout_pct: number;
+  reward_maturity_hours: number;
+  min_baseline_posts: number;
+}
 interface AllSettings {
   llm?: Partial<LlmSettings>;
   media?: Partial<MediaSettings>;
@@ -57,6 +63,7 @@ interface AllSettings {
   approval?: Partial<ApprovalSettings>;
   humor?: Partial<HumorSettings>;
   trends?: Partial<TrendsSettings>;
+  learning?: Partial<LearningSettings>;
   upload_post?: { profile_username?: string };
 }
 interface SettingsResp {
@@ -194,6 +201,12 @@ function SettingsLoaded(props: {
     fast_poll_minutes: s.trends?.fast_poll_minutes ?? 30,
     subreddits: s.trends?.subreddits ?? [],
   });
+  const [learning, setLearning] = useState<LearningSettings>({
+    decay_half_life_days: s.learning?.decay_half_life_days ?? 45,
+    holdout_pct: s.learning?.holdout_pct ?? 0.1,
+    reward_maturity_hours: s.learning?.reward_maturity_hours ?? 48,
+    min_baseline_posts: s.learning?.min_baseline_posts ?? 3,
+  });
   // Subreddits edit as a comma-separated string; parsed back on save.
   const [subredditsText, setSubredditsText] = useState(trends.subreddits.join(", "));
   const [profile, setProfile] = useState(
@@ -206,6 +219,7 @@ function SettingsLoaded(props: {
   const approvalSave = useSectionSave("approval", reload);
   const humorSave = useSectionSave("humor", reload);
   const trendsSave = useSectionSave("trends", reload);
+  const learningSave = useSectionSave("learning", reload);
   const profileSave = useSectionSave("upload_post", reload);
 
   const saveTrends = () => trendsSave.save({
@@ -550,6 +564,41 @@ function SettingsLoaded(props: {
               <input className="input" value={subredditsText} placeholder="recruitinghell, internships, jobs"
                 onChange={(e) => setSubredditsText(e.target.value)} />
               <span className="field-hint">Niche subs watched for early trend signal and content material.</span>
+            </div>
+          </div>
+        </Card>
+
+        {/* 9. Learning */}
+        <Card title="Learning"
+          action={<SaveBtn saving={learningSave.saving} onClick={() => learningSave.save(learning)} />}>
+          <div className="stack" style={{ gap: 14 }}>
+            <div className="grid cols-2">
+              <div className="field">
+                <span className="field-label">Evidence half-life (days)</span>
+                <input className="input" type="number" min={0} value={learning.decay_half_life_days}
+                  onChange={(e) => setLearning({ ...learning, decay_half_life_days: Math.max(0, Number(e.target.value) || 0) })} />
+                <span className="field-hint">Old bandit evidence decays — 0 = never decay.</span>
+              </div>
+              <div className="field">
+                <span className="field-label">Holdout share</span>
+                <input className="input" type="number" min={0} max={0.5} step={0.01} value={learning.holdout_pct}
+                  onChange={(e) => setLearning({ ...learning, holdout_pct: Number(e.target.value) })} />
+                <span className="field-hint">Share of generations using a random policy — the control group that proves learning lifts (0–0.5).</span>
+              </div>
+            </div>
+            <div className="grid cols-2">
+              <div className="field">
+                <span className="field-label">Reward maturity (hours)</span>
+                <input className="input" type="number" min={0} value={learning.reward_maturity_hours}
+                  onChange={(e) => setLearning({ ...learning, reward_maturity_hours: Math.max(0, Math.round(Number(e.target.value) || 0)) })} />
+                <span className="field-hint">A post is rewarded exactly once, after this age.</span>
+              </div>
+              <div className="field">
+                <span className="field-label">Min baseline posts</span>
+                <input className="input" type="number" min={1} value={learning.min_baseline_posts}
+                  onChange={(e) => setLearning({ ...learning, min_baseline_posts: Math.max(1, Math.round(Number(e.target.value) || 1)) })} />
+                <span className="field-hint">Measured posts a platform needs before rewards flow.</span>
+              </div>
             </div>
           </div>
         </Card>

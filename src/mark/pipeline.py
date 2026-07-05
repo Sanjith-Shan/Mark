@@ -73,9 +73,16 @@ def gather_context(app: App, llm: LLM, product: dict, platform: str,
         from .learning import bandit
 
         if policy == "holdout":
+            row = db_module.query_one(
+                app.conn,
+                "SELECT COUNT(*) AS n FROM content WHERE product_id = ? AND platform = ?",
+                (product["id"], platform))
+            # Count-seeded (not clock-seeded): every holdout generation still
+            # gets fresh uniform picks, but runs are reproducible — required
+            # for the evolution-proof simulation to be deterministic.
             bandit_picks = bandit.random_policy(
                 app, platform, product=product,
-                seed=f"{product['id']}:{platform}:{datetime.now(timezone.utc).isoformat()}")
+                seed=f"{product['id']}:{platform}:{row['n'] if row else 0}:holdout-picks")
         else:
             bandit_picks = bandit.recommend(app, product["id"], platform, product=product)
     except Exception as exc:
@@ -325,6 +332,7 @@ def _plan_from_content(content: dict):
         platform=content["platform"], content_type=content["content_type"],
         topic=sc.get("topic", ""), angle=sc.get("angle", ""),
         hook_style=sc.get("hook_style", "question"), tone=sc.get("tone", "relatable"),
+        emotional_target=sc.get("emotional_target", ""),
         trend_tie_in=sc.get("trend_tie_in"), reasoning=sc.get("reasoning", ""),
     )
 

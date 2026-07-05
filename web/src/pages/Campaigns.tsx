@@ -15,11 +15,18 @@ interface CampaignForm {
   cadence: Record<string, number>;
   subreddit: string;
   board_id: string;
+  kind: string;
+  content_rating: string;
+  upload_profile: string;
+  trend_subreddits: string;
+  trend_keywords: string;
 }
 
 const blankForm = (): CampaignForm => ({
   name: "", description: "", target_audience: "", brand_voice: "",
   website_url: "", platforms: [], cadence: {}, subreddit: "", board_id: "",
+  kind: "product", content_rating: "standard", upload_profile: "",
+  trend_subreddits: "", trend_keywords: "",
 });
 
 const formFrom = (c: Campaign): CampaignForm => ({
@@ -32,7 +39,14 @@ const formFrom = (c: Campaign): CampaignForm => ({
   cadence: { ...c.posting_cadence },
   subreddit: c.platform_options?.reddit?.subreddit ?? "",
   board_id: c.platform_options?.pinterest?.pinterest_board_id ?? "",
+  kind: c.kind ?? "product",
+  content_rating: c.content_rating ?? "standard",
+  upload_profile: c.upload_profile ?? "",
+  trend_subreddits: (c.trend_sources?.subreddits ?? []).join(", "),
+  trend_keywords: (c.trend_sources?.keywords ?? []).join(", "),
 });
+
+const parseCsv = (s: string) => s.split(",").map((x) => x.trim()).filter(Boolean);
 
 export default function Campaigns() {
   const { campaigns, refreshCampaigns, runJob, toast } = useGlobal();
@@ -198,10 +212,17 @@ function CampaignModal({ campaign, onClose }: { campaign: Campaign | null; onClo
       description: form.description.trim(),
       target_audience: form.target_audience.trim(),
       brand_voice: form.brand_voice.trim(),
-      website_url: form.website_url.trim() || null,
+      website_url: form.kind === "entertainment" ? null : form.website_url.trim() || null,
       platforms: form.platforms,
       posting_cadence,
       platform_options,
+      kind: form.kind,
+      content_rating: form.content_rating,
+      upload_profile: form.upload_profile.trim() || null,
+      trend_sources: {
+        subreddits: parseCsv(form.trend_subreddits).map((s) => s.replace(/^r\//, "")),
+        keywords: parseCsv(form.trend_keywords),
+      },
     };
     try {
       if (campaign) {
@@ -229,9 +250,32 @@ function CampaignModal({ campaign, onClose }: { campaign: Campaign | null; onClo
               onChange={(e) => set("name", e.target.value)} autoFocus />
           </div>
           <div className="field">
-            <span className="field-label">Website URL <span className="faint">(optional)</span></span>
-            <input className="input" value={form.website_url} placeholder="https://…"
-              onChange={(e) => set("website_url", e.target.value)} />
+            <span className="field-label">Kind</span>
+            <select className="input" value={form.kind}
+              onChange={(e) => set("kind", e.target.value)}>
+              <option value="product">product — marketing something</option>
+              <option value="entertainment">entertainment — content is the product</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="grid cols-2">
+          {form.kind !== "entertainment" && (
+            <div className="field">
+              <span className="field-label">Website URL <span className="faint">(optional)</span></span>
+              <input className="input" value={form.website_url} placeholder="https://…"
+                onChange={(e) => set("website_url", e.target.value)} />
+            </div>
+          )}
+          <div className="field">
+            <span className="field-label">Content rating</span>
+            <select className="input" value={form.content_rating}
+              onChange={(e) => set("content_rating", e.target.value)}>
+              <option value="clean">clean</option>
+              <option value="standard">standard</option>
+              <option value="edgy">edgy</option>
+            </select>
+            <span className="field-hint">How spicy the content is allowed to get — platform caps still apply.</span>
           </div>
         </div>
 
@@ -304,6 +348,28 @@ function CampaignModal({ campaign, onClose }: { campaign: Campaign | null; onClo
             )}
           </div>
         )}
+
+        <div className="field">
+          <span className="field-label">upload-post profile <span className="faint">(optional)</span></span>
+          <input className="input" value={form.upload_profile} placeholder="defaults to the global profile"
+            onChange={(e) => set("upload_profile", e.target.value)} />
+          <span className="field-hint">Post this campaign through its own upload-post.com profile (separate accounts).</span>
+        </div>
+
+        <div className="grid cols-2">
+          <div className="field">
+            <span className="field-label">Trend subreddits <span className="faint">(comma-separated)</span></span>
+            <input className="input" value={form.trend_subreddits} placeholder="e.g. cscareerquestions, internships"
+              onChange={(e) => set("trend_subreddits", e.target.value)} />
+            <span className="field-hint">Subreddits watched for this campaign's trend radar.</span>
+          </div>
+          <div className="field">
+            <span className="field-label">Trend keywords <span className="faint">(comma-separated)</span></span>
+            <input className="input" value={form.trend_keywords} placeholder="e.g. job search, resume"
+              onChange={(e) => set("trend_keywords", e.target.value)} />
+            <span className="field-hint">Search terms scanned across trend sources.</span>
+          </div>
+        </div>
 
         {error != null && (
           <div className="small" style={{ color: "var(--red)" }}>{error}</div>

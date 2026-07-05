@@ -8,6 +8,14 @@ export interface Campaign {
   platforms: string[];
   posting_cadence: Record<string, number>;
   platform_options: Record<string, Record<string, string>>;
+  /** "product" | "entertainment" — entertainment campaigns market the content itself */
+  kind?: string | null;
+  /** "clean" | "standard" | "edgy" (platform caps still apply) */
+  content_rating?: string | null;
+  /** per-campaign upload-post profile (multi-account posting) */
+  upload_profile?: string | null;
+  /** per-campaign trend radar sources */
+  trend_sources?: { subreddits?: string[]; keywords?: string[] } | null;
   active: number;
   archived?: number;
   created_at: string;
@@ -66,6 +74,8 @@ export interface Content {
     character_id?: number | null;
     character?: string | null;
     forced_trend?: string | null;
+    /** "holdout" = random-policy control group post (proves learning lift) */
+    policy?: string | null;
   };
   draft: Draft;
   status: string;
@@ -245,7 +255,45 @@ export interface Insights {
   } | null;
   bandit: BanditArm[];
   winners: number;
+  /** bandit-policy vs random-holdout comparison; null until both groups have data */
+  holdout_lift?: HoldoutLift | null;
   campaign?: string;
+}
+
+export interface HoldoutLift {
+  bandit_posts: number;
+  bandit_avg_reward: number;
+  holdout_posts: number;
+  holdout_avg_reward: number;
+  lift_pct: number;
+}
+
+export interface Experiment {
+  id: number;
+  name: string;
+  hypothesis: string | null;
+  campaign_ids: string[];
+  metric: string;
+  status: string; // "running" | "concluded"
+  conclusion: string | null;
+  started_at: string;
+  ended_at: string | null;
+}
+
+export interface ExperimentVariant {
+  campaign_id: string;
+  campaign_name: string;
+  posts: number;
+  avg_engagement: number;
+  views: number;
+  likes: number;
+  avg_reward: number | null;
+  rewarded_posts: number;
+}
+
+export interface ExperimentReport extends Experiment {
+  variants: ExperimentVariant[];
+  leader: string | null;
 }
 
 export interface BanditArm {

@@ -36,6 +36,7 @@ def client(tmp_path_factory):
     enable_fast_learning(home)
     app = create_app(home=home, force_mock=True)
     with TestClient(app) as c:
+        c.home = home  # expose for tests that need direct DB access
         yield c
     mp.undo()
 
@@ -249,3 +250,175 @@ def test_autopilot_endpoints(client):
         resp = client.post("/api/autopilot/stop")
         assert resp.status_code == 200
         assert resp.json()["running"] is False
+
+
+def test_settings_validation_rejects_bad_values(client):
+    # Malformed values must be rejected BEFORE they are written to YAML —
+    # a persisted bad value would brick every endpoint on the next reload.
+    resp = client.patch("/api/settings",
+                        json={"settings": {"llm": {"variants": "not-a-number"}}})
+    assert resp.status_code == 400
+    assert "invalid settings" in resp.json()["detail"]
+
+    # The bad value was never persisted and the API still works.
+    resp = client.get("/api/settings")
+    assert resp.status_code == 200
+    assert resp.json()["settings"]["llm"].get("variants") != "not-a-number"
+
+    # A valid patch still goes through afterwards.
+    resp = client.patch("/api/settings", json={"settings": {"llm": {"variants": 1}}})
+    assert resp.status_code == 200, resp.text
+
+    # The learning section is editable (and validated) too.
+    resp = client.patch("/api/settings",
+                        json={"settings": {"learning": {"holdout_pct": "nope"}}})
+    assert resp.status_code == 400
+    resp = client.patch("/api/settings",
+                        json={"settings": {"learning": {"min_baseline_posts": 1}}})
+    assert resp.status_code == 200, resp.text
+
+
+def test_approve_expired_trend_draft_rejected(client):
+    from mark import db as db_module
+
+    cid = make_campaign(client, "expiredco")
+    row = generate_one(client, cid)
+
+    # Backdate the trend TTL directly in the DB (no API mutates expires_at).
+    conn = db_module.connect(client.home / "data" / "mark.db")
+    try:
+        db_module.update(conn, "content", row["id"], expires_at="2020-01-01 00:00:00")
+    finally:
+        conn.close()
+
+    resp = client.post(f"/api/content/{row['id']}/approve")
+    assert resp.status_code == 400
+    assert "expired" in resp.json()["detail"]
+    # Status untouched — the draft was not silently approved.
+    assert client.get(f"/api/content/{row['id']}").json()["status"] == "draft"
+
+
+def test_patch_posted_content_rejected(client):
+    cid = make_campaign(client, "immutableco")
+    row = generate_one(client, cid)
+    approve_and_post(client, row["id"])
+
+    resp = client.patch(f"/api/content/{row['id']}", json={"caption": "sneaky edit"})
+    assert resp.status_code == 400
+    assert "posted" in resp.json()["detail"]
+    assert client.get(f"/api/content/{row['id']}").json()["caption"] != "sneaky edit"
+
+
+def test_content_platform_filter_in_sql(client):
+    cid = make_campaign(client, "filterco")
+    generate_one(client, cid, platform="x")
+
+    rows = client.get(f"/api/content?campaign={cid}&platform=x&limit=1").json()
+    assert len(rows) == 1 and rows[0]["platform"] == "x"
+    # Platform filter runs in SQL, so an unmatched platform is empty (not
+    # silently hidden by LIMIT applied before the filter).
+    assert client.get(f"/api/content?campaign={cid}&platform=linkedin").json() == []
+
+
+def test_campaign_new_fields_roundtrip(client):
+    resp = client.post("/api/campaigns", json={
+        "id": "fieldsco",
+        "name": "FieldsCo",
+        "description": "A lore-driven character universe.",
+        "target_audience": "chronically online 18-24s",
+        "brand_voice": "absurdist, deadpan",
+        "platforms": ["x"],
+        "posting_cadence": {"x": 1},
+        "kind": "entertainment",
+        "content_rating": "edgy",
+        "upload_profile": "alt-profile",
+        "trend_sources": {"subreddits": ["okbuddyretard", " memes "], "keywords": ["brainrot"]},
+    })
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["kind"] == "entertainment"
+    assert body["content_rating"] == "edgy"
+    assert body["upload_profile"] == "alt-profile"
+    assert body["trend_sources"] == {"subreddits": ["okbuddyretard", "memes"],
+                                     "keywords": ["brainrot"]}
+
+    # Fields appear in the list response too.
+    listed = next(c for c in client.get("/api/campaigns").json() if c["id"] == "fieldsco")
+    assert listed["kind"] == "entertainment"
+
+    # Patch updates them; invalid enum values are rejected.
+    resp = client.patch("/api/campaigns/fieldsco", json={
+        "kind": "product", "content_rating": "clean",
+        "trend_sources": {"subreddits": [], "keywords": ["job search"]},
+    })
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["kind"] == "product" and body["content_rating"] == "clean"
+    assert body["trend_sources"]["keywords"] == ["job search"]
+
+    assert client.patch("/api/campaigns/fieldsco",
+                        json={"kind": "cinematic-universe"}).status_code == 400
+    assert client.patch("/api/campaigns/fieldsco",
+                        json={"content_rating": "nsfw"}).status_code == 400
+
+
+def test_insights_includes_holdout_lift(client):
+    cid = make_campaign(client, "liftco")
+    data = client.get(f"/api/insights?campaign={cid}").json()
+    assert "holdout_lift" in data  # None until both policy groups have rewarded posts
+    assert data["holdout_lift"] is None
+
+
+def test_experiments_flow(client):
+    cid_a = make_campaign(client, "exp-a")
+    cid_b = make_campaign(client, "exp-b")
+    row_a = generate_one(client, cid_a)
+    row_b = generate_one(client, cid_b)
+    approve_and_post(client, row_a["id"])
+    approve_and_post(client, row_b["id"])
+    for cid in (cid_a, cid_b):
+        resp = client.post(f"/api/analytics/collect?campaign={cid}")
+        assert resp.status_code == 200, resp.text
+        wait_job(client, resp.json()["job_id"])
+
+    # Guardrails: unknown campaign / too few variants.
+    assert client.post("/api/experiments", json={
+        "name": "bad", "campaign_ids": ["exp-a"]}).status_code == 400
+    assert client.post("/api/experiments", json={
+        "name": "bad", "campaign_ids": ["exp-a", "no-such-campaign"]}).status_code == 404
+
+    resp = client.post("/api/experiments", json={
+        "name": "Summer voice test",
+        "hypothesis": "variant A's voice out-engages variant B",
+        "campaign_ids": [cid_a, cid_b],
+    })
+    assert resp.status_code == 200, resp.text
+    exp = resp.json()
+    assert exp["status"] == "running"
+    assert exp["campaign_ids"] == [cid_a, cid_b]
+    assert exp["metric"] == "engagement_rate"
+
+    listed = client.get("/api/experiments").json()
+    assert any(e["id"] == exp["id"] and e["campaign_ids"] == [cid_a, cid_b] for e in listed)
+
+    report = client.get(f"/api/experiments/{exp['id']}/report").json()
+    assert [v["campaign_id"] for v in report["variants"]] == [cid_a, cid_b]
+    for variant in report["variants"]:
+        assert variant["posts"] == 1
+        assert variant["views"] > 0
+        assert variant["avg_engagement"] >= 0
+    assert report["leader"] in (cid_a, cid_b, None)
+
+    resp = client.post(f"/api/experiments/{exp['id']}/conclude",
+                       json={"conclusion": "variant A wins"})
+    assert resp.status_code == 200, resp.text
+    concluded = resp.json()
+    assert concluded["status"] == "concluded"
+    assert concluded["conclusion"] == "variant A wins"
+    assert concluded["ended_at"]
+
+    # Report still works after conclusion; 404s for unknown experiments.
+    assert client.get(f"/api/experiments/{exp['id']}/report").status_code == 200
+    assert client.get("/api/experiments/999999/report").status_code == 404
+    assert client.post("/api/experiments/999999/conclude",
+                       json={"conclusion": "x"}).status_code == 404

@@ -17,11 +17,11 @@ from typing import Any, Optional
 import yaml
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from .. import db as db_module
 from .. import store
-from ..config import ProductConfig
+from ..config import ProductConfig, Settings
 from .runtime import Runtime
 
 
@@ -70,7 +70,24 @@ def build_router(rt: Runtime) -> APIRouter:
         out["platforms"] = db_module.loads(p.get("platforms"), [])
         out["posting_cadence"] = db_module.loads(p.get("posting_cadence"), {})
         out["platform_options"] = db_module.loads(p.get("platform_options"), {})
+        out["trend_sources"] = db_module.loads(p.get("trend_sources"), {})
         return out
+
+    CAMPAIGN_KINDS = ("product", "entertainment")
+    CONTENT_RATINGS = ("clean", "standard", "edgy")
+
+    def check_campaign_enums(kind: Optional[str], content_rating: Optional[str]) -> None:
+        if kind is not None and kind not in CAMPAIGN_KINDS:
+            raise HTTPException(400, f"kind must be one of {', '.join(CAMPAIGN_KINDS)}")
+        if content_rating is not None and content_rating not in CONTENT_RATINGS:
+            raise HTTPException(
+                400, f"content_rating must be one of {', '.join(CONTENT_RATINGS)}")
+
+    def normalized_trend_sources(ts: Optional[dict]) -> Optional[dict]:
+        if ts is None:
+            return None
+        return {"subreddits": [str(s).strip() for s in ts.get("subreddits", []) if str(s).strip()],
+                "keywords": [str(k).strip() for k in ts.get("keywords", []) if str(k).strip()]}
 
     # ------------------------------------------------------------------ #
     # Status / overview
@@ -165,6 +182,10 @@ def build_router(rt: Runtime) -> APIRouter:
         posting_cadence: dict[str, int] = Field(default_factory=dict)
         platform_options: dict[str, dict] = Field(default_factory=dict)
         active: bool = True
+        kind: str = "product"                 # "product" | "entertainment"
+        content_rating: str = "standard"      # "clean" | "standard" | "edgy"
+        upload_profile: Optional[str] = None  # per-campaign upload-post profile
+        trend_sources: dict[str, list[str]] = Field(default_factory=dict)  # subreddits/keywords
 
     @r.get("/campaigns")
     def campaigns() -> list[dict]:
@@ -176,6 +197,7 @@ def build_router(rt: Runtime) -> APIRouter:
         pid = body.id or re.sub(r"[^a-z0-9]+", "-", body.name.lower()).strip("-")
         if not pid:
             raise HTTPException(400, "campaign needs a name")
+        check_campaign_enums(body.kind, body.content_rating)
         cfg = ProductConfig(
             id=pid, name=body.name, description=body.description,
             target_audience=body.target_audience, brand_voice=body.brand_voice,
@@ -183,14 +205,21 @@ def build_router(rt: Runtime) -> APIRouter:
             posting_cadence=body.posting_cadence or {p: 1 for p in body.platforms},
         )
         store.upsert_product(app.conn, cfg, active=False)
+        trend_sources = normalized_trend_sources(body.trend_sources) or {}
         store.update_product(app.conn, pid,
                              active=1 if body.active else 0, archived=0,
-                             platform_options=body.platform_options)
+                             platform_options=body.platform_options,
+                             kind=body.kind, content_rating=body.content_rating,
+                             upload_profile=body.upload_profile or None,
+                             trend_sources=trend_sources)
         # Keep a YAML copy alongside (same as the CLI flow) for portability.
         try:
             yaml_path = app.paths.products_dir / f"{pid}.yaml"
             yaml_path.write_text(yaml.safe_dump(
-                {**cfg.model_dump(), "platform_options": body.platform_options},
+                {**cfg.model_dump(), "platform_options": body.platform_options,
+                 "kind": body.kind, "content_rating": body.content_rating,
+                 "upload_profile": body.upload_profile,
+                 "trend_sources": trend_sources},
                 sort_keys=False))
         except Exception:
             pass
@@ -212,17 +241,25 @@ def build_router(rt: Runtime) -> APIRouter:
         posting_cadence: Optional[dict[str, int]] = None
         platform_options: Optional[dict[str, dict]] = None
         active: Optional[bool] = None
+        kind: Optional[str] = None
+        content_rating: Optional[str] = None
+        upload_profile: Optional[str] = None
+        trend_sources: Optional[dict[str, list[str]]] = None
 
     @r.patch("/campaigns/{product_id}")
     def patch_campaign(product_id: str, body: CampaignPatch) -> dict:
         app = rt.app()
         get_product_or_404(product_id)
+        check_campaign_enums(body.kind, body.content_rating)
         fields: dict[str, Any] = {}
         for k in ("name", "description", "target_audience", "brand_voice",
-                  "website_url", "platforms", "posting_cadence", "platform_options"):
+                  "website_url", "platforms", "posting_cadence", "platform_options",
+                  "kind", "content_rating", "upload_profile"):
             v = getattr(body, k)
             if v is not None:
                 fields[k] = v
+        if body.trend_sources is not None:
+            fields["trend_sources"] = normalized_trend_sources(body.trend_sources)
         if body.active is not None:
             fields["active"] = 1 if body.active else 0
         if fields:
@@ -249,10 +286,10 @@ def build_router(rt: Runtime) -> APIRouter:
     @r.get("/content")
     def content_list(status: Optional[str] = None, campaign: Optional[str] = None,
                      platform: Optional[str] = None, limit: int = 100) -> list[dict]:
+        # Platform filtering happens in SQL so LIMIT applies AFTER the filter —
+        # filtering in Python post-LIMIT silently hid matching items.
         rows = store.list_content(rt.app().conn, status=status,
-                                  product_id=campaign, limit=limit)
-        if platform:
-            rows = [x for x in rows if x["platform"] == platform]
+                                  product_id=campaign, platform=platform, limit=limit)
         return [content_out(x) for x in rows]
 
     @r.get("/content/{content_id}")
@@ -289,6 +326,10 @@ def build_router(rt: Runtime) -> APIRouter:
     def patch_content(content_id: int, body: ContentPatch) -> dict:
         app = rt.app()
         row = get_content_or_404(content_id)
+        # Posted content is immutable — the winners index and learning history
+        # embed the caption/hook as posted; editing after the fact corrupts them.
+        if row["status"] == "posted":
+            raise HTTPException(400, "content is already posted and cannot be edited")
         fields: dict[str, Any] = {}
         for k in ("caption", "hook", "hashtags", "scheduled_at"):
             v = getattr(body, k)
@@ -319,6 +360,13 @@ def build_router(rt: Runtime) -> APIRouter:
 
         app = rt.app()
         row = get_content_or_404(content_id)
+        # Trend content has a TTL — approving after the window closed would
+        # queue a dead meme for posting.
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        if row.get("expires_at") and str(row["expires_at"]) <= now:
+            raise HTTPException(
+                400, f"content {content_id} expired at {row['expires_at']} UTC — "
+                     "the trend window has closed; reject it instead")
         already_approved = row["status"] == "approved"
         store.set_content_status(
             app.conn, content_id, "approved",
@@ -804,7 +852,7 @@ def build_router(rt: Runtime) -> APIRouter:
         app = rt.app()
         product = store.resolve_product(app.conn, campaign)
         if not product:
-            return {"insights": None, "bandit": [], "winners": 0}
+            return {"insights": None, "bandit": [], "winners": 0, "holdout_lift": None}
         from ..learning import bandit, feedback, winners
 
         data = feedback.latest_insights(app, product["id"])
@@ -817,6 +865,9 @@ def build_router(rt: Runtime) -> APIRouter:
             "insights": insights_out,
             "bandit": bandit.leaderboard(app, product["id"]),
             "winners": winners.count(app, product_id=product["id"]),
+            # Standing empirical proof the learning loop lifts performance:
+            # bandit-policy posts vs the random holdout control group.
+            "holdout_lift": feedback.holdout_lift(app, product["id"]),
             "campaign": product["id"],
         }
 
@@ -849,6 +900,64 @@ def build_router(rt: Runtime) -> APIRouter:
 
         job = rt.jobs.submit("learn", "Run feedback loop", _run)
         return {"job_id": job.id}
+
+    # ------------------------------------------------------------------ #
+    # Experiments (campaigns as A/B variants)
+    # ------------------------------------------------------------------ #
+    @r.get("/experiments")
+    def experiments_list() -> list[dict]:
+        from .. import experiments as experiments_mod
+
+        return experiments_mod.list_experiments(rt.app())
+
+    class ExperimentIn(BaseModel):
+        name: str
+        hypothesis: str = ""
+        campaign_ids: list[str]
+        metric: str = "engagement_rate"
+
+    @r.post("/experiments")
+    def create_experiment(body: ExperimentIn) -> dict:
+        from .. import experiments as experiments_mod
+
+        app = rt.app()
+        if not body.name.strip():
+            raise HTTPException(400, "experiment needs a name")
+        if len(body.campaign_ids) < 2:
+            raise HTTPException(400, "an experiment needs at least 2 variant campaigns")
+        for cid in body.campaign_ids:
+            get_product_or_404(cid)
+        exp_id = experiments_mod.create_experiment(
+            app, body.name.strip(), body.hypothesis.strip(),
+            body.campaign_ids, metric=body.metric)
+        db_module.log_activity(app.conn, "experiment",
+                               f"Experiment “{body.name.strip()}” started",
+                               level="success")
+        return experiments_mod.get_experiment(app, exp_id)
+
+    @r.get("/experiments/{experiment_id}/report")
+    def experiment_report(experiment_id: int) -> dict:
+        from .. import experiments as experiments_mod
+
+        report = experiments_mod.experiment_report(rt.app(), experiment_id)
+        if report is None:
+            raise HTTPException(404, f"experiment {experiment_id} not found")
+        return report
+
+    class ConcludeIn(BaseModel):
+        conclusion: str
+
+    @r.post("/experiments/{experiment_id}/conclude")
+    def conclude_experiment(experiment_id: int, body: ConcludeIn) -> dict:
+        from .. import experiments as experiments_mod
+
+        app = rt.app()
+        out = experiments_mod.conclude_experiment(app, experiment_id, body.conclusion)
+        if out is None:
+            raise HTTPException(404, f"experiment {experiment_id} not found")
+        db_module.log_activity(app.conn, "experiment",
+                               f"Experiment “{out['name']}” concluded")
+        return out
 
     # ------------------------------------------------------------------ #
     # Jobs / events / autopilot
@@ -944,7 +1053,8 @@ def build_router(rt: Runtime) -> APIRouter:
                 "profile_username": app.settings.upload_post.profile_username}
 
     ALLOWED_SETTINGS_SECTIONS = {"llm", "media", "scheduling", "approval",
-                                 "upload_post", "platforms", "trends", "humor"}
+                                 "upload_post", "platforms", "trends", "humor",
+                                 "learning"}
 
     class SettingsPatch(BaseModel):
         settings: dict[str, Any]
@@ -962,6 +1072,12 @@ def build_router(rt: Runtime) -> APIRouter:
                 _deep_merge(raw[section], value)
             else:
                 raw[section] = value
+        # Validate BEFORE writing: a malformed value persisted to YAML would
+        # crash Settings loading and brick every endpoint (and the CLI).
+        try:
+            Settings.model_validate(raw)
+        except ValidationError as exc:
+            raise HTTPException(400, f"invalid settings: {exc}")
         app.paths.default_config.write_text(yaml.safe_dump(raw, sort_keys=False))
         rt.reload()
         db_module.log_activity(app.conn, "settings", "Settings updated")

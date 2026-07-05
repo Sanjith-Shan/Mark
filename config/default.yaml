@@ -8,7 +8,8 @@ llm:
   text_model: "gpt-5.4-mini"            # Strategist / writer / analyzer (best value, July 2026)
   judge_model: "gpt-5.4-nano"           # Cheaper model for variant judging / scoring
   embedding_model: "text-embedding-3-small"
-  variants: 1                            # Candidate drafts to generate, then judge (1 = no contest)
+  variants: 3                            # Candidate drafts per post; a judge picks the winner
+                                         # (single-draft output was the "safe median" failure mode)
   self_critique: true                    # Revise drafts against the anti-slop rules before saving
   novelty_threshold: 0.93                # Cosine sim above which new content is "too similar" to recent posts
   novelty_lookback: 40                   # How many recent posts to compare against for novelty

@@ -57,8 +57,11 @@ def job_generate(app: App, llm: LLM) -> None:
         return
     for product in _active_products(app):
         cadence = db_module.loads(product["posting_cadence"], {}) or {}
+        # Only platforms actually present in config get drafts: an unknown
+        # platform would generate forever with no posting job to drain it.
         platforms = [p for p in pipeline.product_platforms(product)
-                     if app.settings.platform(p).enabled]
+                     if p in app.settings.platforms
+                     and app.settings.platform(p).enabled]
         for platform in platforms:
             count = int(cadence.get(platform, 1))
             if count <= 0:
@@ -79,7 +82,34 @@ def job_generate(app: App, llm: LLM) -> None:
         log.info("generated drafts for %s", product["id"])
 
 
-def job_post_platform(app: App, platform: str) -> None:
+def _slot_preferred(app: App, product_id: str, platform: str,
+                    current_slot: Optional[str]) -> bool:
+    """Should this campaign's post go out at THIS optimal-time slot?
+
+    The post_time bandit arm was previously write-only — learned timing never
+    changed behavior because posting slots were pure cron. Now: sample the
+    bandit's post_time preference; if it prefers a LATER slot today, hold the
+    post for that slot. An earlier (already passed) preference posts now —
+    holding for tomorrow would starve throughput.
+    """
+    if not current_slot:
+        return True
+    times = app.settings.platform(platform).optimal_times or []
+    if len(times) <= 1:
+        return True
+    try:
+        from ..learning import bandit
+
+        pick = bandit.recommend(app, product_id, platform).get("post_time")
+    except Exception:
+        return True
+    if not pick or pick == current_slot or pick not in times:
+        return True
+    # Post now unless the preferred slot is still ahead of us today.
+    return not (pick > current_slot)
+
+
+def job_post_platform(app: App, platform: str, slot: Optional[str] = None) -> None:
     from .. import monitor
     from ..posting import manager
 
@@ -107,6 +137,8 @@ def job_post_platform(app: App, platform: str) -> None:
             continue
         if manager.posts_today(app, platform, product_id=row["product_id"]) >= cap:
             continue
+        if not _slot_preferred(app, row["product_id"], platform, slot):
+            continue  # the bandit prefers a later slot today — hold for it
         manager.post_content(app, dict(row))
         log.info("posted content %s to %s", row["id"], platform)
         return
@@ -159,6 +191,7 @@ def job_trends_fast(app: App, llm: LLM) -> None:
         if app.settings.trends.auto_react:
             _safe(aggregator.react, app, llm, product)
     _safe(aggregator.expire_stale_content, app)
+    _safe(aggregator.purge_old_trends, app)
     log.info("fast trend poll done")
 
 
@@ -350,7 +383,7 @@ def build_scheduler(app: App, llm: LLM, *, blocking: bool = True,
         for t in app.settings.platform(platform).optimal_times:
             hour, minute = _parse_hhmm(t)
             sched.add_job(
-                _job(job_post_platform, extra_args=(platform,)),
+                _job(job_post_platform, extra_args=(platform, t)),
                 CronTrigger(hour=hour, minute=minute, timezone=tz, jitter=jitter),
                 id=f"post-{platform}-{t}", name=f"post {platform} @ {t}",
             )

@@ -521,6 +521,9 @@ For each candidate fill the full scaffold: persona, mechanism ("{mechanism}"),
 hook (the scroll-stopping opening — it doubles as the setup), caption, script (only
 if this is a video — exactly what is spoken, the punch beat on its own line),
 target_assumption, connector, reinterpretation, punch_word.
+FORMAT PRESERVATION: if the current draft's script is a message thread (lines in
+the exact form "Sender: message"), every candidate's script MUST keep that exact
+line format — the renderer parses it; breaking it breaks the video.
 If you cannot name all four scaffold fields for a candidate, that candidate is not
 a joke yet — rework it until you can."""
 
@@ -606,8 +609,21 @@ Penalize generic marketing slop heavily. {ANTI_SLOP}
 Pick the single best draft (best_index, 0-based) and list any slop_violations you saw."""
 
 
+def _draft_body(d) -> str:
+    """Full judgeable surface: scripts and slides ARE the content for video/
+    carousel posts — judging hook+caption alone lets the actual joke surface
+    ship unexamined."""
+    s = f"HOOK: {d.hook}\nCAPTION: {d.caption}"
+    if getattr(d, "script", None):
+        s += f"\nSCRIPT:\n{d.script[:900]}"
+    if getattr(d, "slide_texts", None):
+        s += "\nSLIDES:\n" + "\n".join(f"  {i+1}. {t[:120]}"
+                                       for i, t in enumerate(d.slide_texts[:12]))
+    return s
+
+
 def judge_user(drafts: list) -> str:
-    blocks = [f"[{i}] HOOK: {d.hook}\nCAPTION: {d.caption}" for i, d in enumerate(drafts)]
+    blocks = [f"[{i}] {_draft_body(d)}" for i, d in enumerate(drafts)]
     return ("Here are the candidate drafts:\n\n" + "\n\n".join(blocks)
             + "\n\nReturn the index of the best draft and your scores.")
 
@@ -630,7 +646,7 @@ already great, set needs_revision=false."""
 
 
 def critique_user(draft) -> str:
-    return f"HOOK: {draft.hook}\nCAPTION: {draft.caption}\n\nCritique and, if needed, revise."
+    return f"{_draft_body(draft)}\n\nCritique and, if needed, revise."
 
 
 # --------------------------------------------------------------------------- #

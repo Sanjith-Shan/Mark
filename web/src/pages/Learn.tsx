@@ -1,9 +1,9 @@
-// Learn — insights, bandit leaderboard, and the self-improvement loop.
-import { useEffect, useState } from "react";
+// Learn — insights, bandit leaderboard, experiments, and the self-improvement loop.
+import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import { useGlobal } from "../store";
-import { Insights } from "../types";
-import { Card, Empty, Pill, PlatformChip, Stat, pct, timeAgo } from "../components/ui";
+import { Experiment, ExperimentReport, Insights } from "../types";
+import { Card, Empty, Pill, PlatformChip, Stat, StatusPill, pct, timeAgo } from "../components/ui";
 
 export default function Learn() {
   const { campaigns, jobsDoneVersion, runJob } = useGlobal();
@@ -54,6 +54,16 @@ export default function Learn() {
         <Card><Stat
           value={data?.insights?.created_at ? timeAgo(data.insights.created_at) : "never"}
           label="Last analysis" /></Card>
+        {data?.holdout_lift != null && (
+          <Card><Stat
+            value={
+              <span style={{ color: data.holdout_lift.lift_pct >= 0 ? "var(--green)" : "var(--red)" }}>
+                {data.holdout_lift.lift_pct >= 0 ? "+" : ""}{data.holdout_lift.lift_pct}%
+              </span>
+            }
+            label="Learning lift vs random"
+            sub={`${data.holdout_lift.bandit_posts} bandit / ${data.holdout_lift.holdout_posts} holdout posts`} /></Card>
+        )}
       </div>
 
       {!hasAnything ? (
@@ -191,10 +201,168 @@ export default function Learn() {
         </>
       )}
 
+      <ExperimentsSection />
+
       <div className="faint small">
         Mark rewards choices that earn engagement (Thompson sampling) and feeds your best posts back
         into generation as examples.
       </div>
     </>
+  );
+}
+
+/* ---------- experiments (campaigns as A/B variants) ---------- */
+
+function ExperimentsSection() {
+  const { campaigns, toast } = useGlobal();
+  const [reports, setReports] = useState<ExperimentReport[]>([]);
+  const [creating, setCreating] = useState(false);
+  const [name, setName] = useState("");
+  const [hypothesis, setHypothesis] = useState("");
+  const [variantIds, setVariantIds] = useState<string[]>([]);
+
+  const load = useCallback(() => {
+    api.get<Experiment[]>("/api/experiments")
+      .then((exps) =>
+        Promise.all(exps.map((e) => api.get<ExperimentReport>(`/api/experiments/${e.id}/report`))))
+      .then(setReports)
+      .catch(() => {});
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const toggleVariant = (id: string) =>
+    setVariantIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
+
+  const create = async () => {
+    try {
+      await api.post<Experiment>("/api/experiments", {
+        name: name.trim(), hypothesis: hypothesis.trim(), campaign_ids: variantIds,
+      });
+      toast("Experiment started");
+      setCreating(false);
+      setName(""); setHypothesis(""); setVariantIds([]);
+      load();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Create failed", "error");
+    }
+  };
+
+  const conclude = async (r: ExperimentReport) => {
+    const leaderName = r.variants.find((v) => v.campaign_id === r.leader)?.campaign_name;
+    const conclusion = window.prompt(
+      "Conclusion — what did this experiment prove?",
+      leaderName ? `${leaderName} wins on ${r.metric}` : "");
+    if (conclusion == null) return;
+    try {
+      await api.post<Experiment>(`/api/experiments/${r.id}/conclude`, { conclusion });
+      toast("Experiment concluded");
+      load();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Conclude failed", "error");
+    }
+  };
+
+  return (
+    <Card title="Experiments · A/B test lab"
+      action={
+        <button className="btn sm" onClick={() => setCreating((v) => !v)}>
+          {creating ? "Cancel" : "+ New experiment"}
+        </button>
+      }>
+      <div className="stack" style={{ gap: 14 }}>
+        {creating && (
+          <div className="stack" style={{
+            gap: 10, border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: 12,
+          }}>
+            <div className="grid cols-2">
+              <div className="field">
+                <span className="field-label">Name</span>
+                <input className="input" value={name} placeholder="Summer hook test"
+                  onChange={(e) => setName(e.target.value)} />
+              </div>
+              <div className="field">
+                <span className="field-label">Hypothesis</span>
+                <input className="input" value={hypothesis}
+                  placeholder="e.g. edgy voice out-engages clean voice"
+                  onChange={(e) => setHypothesis(e.target.value)} />
+              </div>
+            </div>
+            <div className="field">
+              <span className="field-label">Variant campaigns <span className="faint">(pick 2+)</span></span>
+              <div className="grid cols-3" style={{ gap: 8 }}>
+                {campaigns.map((c) => {
+                  const checked = variantIds.includes(c.id);
+                  return (
+                    <div key={c.id} className={`checkbox-row ${checked ? "checked" : ""}`}
+                      onClick={() => toggleVariant(c.id)}>
+                      <input type="checkbox" checked={checked} readOnly style={{ pointerEvents: "none" }} />
+                      <span style={{ fontSize: 13 }}>{c.name}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="row" style={{ justifyContent: "flex-end" }}>
+              <button className="btn primary sm" disabled={!name.trim() || variantIds.length < 2}
+                onClick={create}>Start experiment</button>
+            </div>
+          </div>
+        )}
+
+        {reports.length === 0 && !creating ? (
+          <Empty icon="🧪" title="No experiments yet"
+            hint="Run two campaign variants side by side and let the numbers pick the winner." />
+        ) : (
+          reports.map((r) => (
+            <div key={r.id} className="stack" style={{
+              gap: 8, border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: 12,
+            }}>
+              <div className="row between">
+                <div className="row wrap">
+                  <span style={{ fontWeight: 700, fontSize: 13.5 }}>{r.name}</span>
+                  <StatusPill status={r.status} />
+                  <Pill>{r.metric}</Pill>
+                </div>
+                {r.status === "running" && (
+                  <button className="btn sm" onClick={() => conclude(r)}>Conclude</button>
+                )}
+              </div>
+              {r.hypothesis && <div className="small muted">Hypothesis: {r.hypothesis}</div>}
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Variant</th><th className="num">Posts</th>
+                    <th className="num">Avg engagement</th><th className="num">Avg reward</th>
+                    <th className="num">Views</th><th className="num">Likes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {r.variants.map((v) => (
+                    <tr key={v.campaign_id}>
+                      <td style={{ fontWeight: 600 }}>
+                        {v.campaign_name}
+                        {r.leader === v.campaign_id && <Pill kind="accent"> 🏆 leader</Pill>}
+                      </td>
+                      <td className="num">{v.posts}</td>
+                      <td className="num">{pct(v.avg_engagement)}</td>
+                      <td className="num">{v.avg_reward != null ? pct(v.avg_reward) : "—"}</td>
+                      <td className="num">{v.views}</td>
+                      <td className="num">{v.likes}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {r.conclusion && (
+                <div className="small muted" style={{
+                  paddingLeft: 12, borderLeft: "3px solid var(--border-strong)", fontStyle: "italic",
+                }}>
+                  {r.conclusion}
+                </div>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+    </Card>
   );
 }

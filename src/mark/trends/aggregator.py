@@ -310,6 +310,15 @@ def react(app: App, llm: LLM, product: dict, trend: Optional[dict] = None,
     return drafted
 
 
+def purge_old_trends(app: App, days: int = 14) -> int:
+    """Sightings older than the velocity window are dead weight — the table
+    otherwise grows without bound at 30-minute polling."""
+    cur = db_module.execute(
+        app.conn, "DELETE FROM trends WHERE collected_at < datetime('now', ?)",
+        (f"-{int(days)} days",))
+    return cur.rowcount
+
+
 def expire_stale_content(app: App) -> int:
     """Auto-reject unposted trend content past its expiry — never post a dead
     meme. Returns the number of rows expired."""
