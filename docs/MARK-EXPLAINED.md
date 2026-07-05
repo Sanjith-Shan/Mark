@@ -49,7 +49,11 @@ The core loop, in order:
    app. Sanjith can edit any field, regenerate media, ask for an AI rewrite
    with an instruction, approve, or reject with feedback. Rejection notes
    ("too generic") are fed back into future writing as hard constraints.
-   There's an auto-approve setting for when he trusts it.
+   Autonomy is EARNED, not toggled: in the default "graduated" mode a draft
+   self-approves only when its own quality scores clear a bar AND that
+   strategy has a proven track record on that platform (≥5 rewarded posts at
+   or above baseline). Because evidence decays, a strategy that stops working
+   loses its autonomy automatically. ("manual" and "full" modes also exist.)
 6. **Posting** — via upload-post.com, a service that connects to all his social
    accounts through one API. Posts go out at good times of day with random
    jitter (to avoid looking like a bot), respecting per-platform daily caps.
@@ -60,7 +64,11 @@ The core loop, in order:
    (explained in section 6).
 
 An **Autopilot** switch runs this entire cycle on a schedule with no human
-involvement (except approval, unless auto-approve is on).
+involvement (except approval, per the graduated-autonomy rules above). Two
+self-monitoring guards make unattended operation safe: if a platform's last
+five posts average far below baseline (engagement collapse / suppression),
+that platform is paused for 48h with a loud alert; and if real API spend
+passes the daily cap, generation freezes until tomorrow.
 
 **Offline-first:** the entire system runs with zero API keys or connected
 accounts. Every external service (OpenAI, video generation, posting, trend
@@ -325,14 +333,29 @@ Three layers, at three speeds:
 which comedic persona, which joke mechanism, which emotion, hook style, format,
 posting time — is a "bandit arm": a small statistical record (a Beta
 distribution — essentially a running tally of evidence) per choice, per
-platform, per campaign, stored in the database. When a post's engagement comes
-in, it's converted to a reward relative to the account's own baseline (with
-shares and saves weighted 2x likes, because those are what actually predict
-distribution in 2026), and the arms that post used get nudged. Selection then
+platform, per campaign, stored in the database. When a post's metrics mature
+(~48h), it is credited EXACTLY ONCE with a graded reward computed against its
+own platform's baseline: performing at baseline = 0.5, 3x baseline ≈ 0.75, a
+10x viral hit ≈ 0.9 — so exceptional posts teach more than merely-fine ones
+(shares/saves still weigh 2x likes, and click-through mixes in at 15% so the
+system leans toward business results, not just vanity engagement). Selection
 *samples* from the distributions rather than always picking the current best —
 so it keeps exploring, one lucky post can't flip a preference, and preferences
-only shift as evidence accumulates. This is real statistics, robust to flukes
-by construction — not notes in a prompt.
+only shift as evidence accumulates. Three more properties matter:
+
+- **Evidence decays** (45-day half-life): old convictions fade, so when the
+  audience's taste or a platform's algorithm shifts, the system re-opens
+  exploration and un-learns dead preferences on its own.
+- **A permanent holdout**: ~10% of generations use a random policy instead of
+  the learned one. Comparing the two groups' rewards is a standing, live
+  measurement that learning is actually lifting performance (shown on the
+  Learn page and in every feedback report).
+- **It is PROVEN, not assumed**: `mark evolve-proof` plants a known hidden
+  audience taste in the offline world, runs the full production loop ~140
+  cycles, inverts the taste mid-run, and verifies three things empirically —
+  recommendations converge on the planted taste (0.32→0.55 share), the learned
+  policy beats the random holdout (+23%), and after the inversion the system
+  re-converges on the new taste. A fast version runs in the test suite.
 
 **Medium (days).** Top-performing posts get embedded and indexed as "winners";
 future writing retrieves the most similar past winners as examples to emulate.
@@ -355,6 +378,45 @@ franchise, the character lore, the calibrated judge — are the point; individua
 post performance in month one is noise.
 
 ---
+
+## 6.5 Beyond one product — campaigns, accounts, experiments
+
+Mark is no longer bound to marketing one product:
+
+- **Entertainment campaigns** (`kind: entertainment`): the content itself IS
+  the business — a pure content account with no product, no CTA, judged purely
+  on watchability/follows/shares. Product-bound strategies (demos, receipts,
+  founder logs) are excluded automatically; everything else (pain-point POVs,
+  characters, slop, fake-text drama, meme carousels, trend-jacks) runs.
+- **Onboarding** (`mark onboard "<description>"`): point Mark at ANY new
+  product or content theme and one research pass generates the full campaign —
+  sharpened audience model, brand voice, specificity bank, pain veins, take
+  pool, domain-adapted briefs for every fitting strategy, trend-radar
+  subreddits/keywords, a character concept with a flaw and an antagonist, and
+  a content rating. (The fact base is left empty on purpose: facts must be
+  human-verified before the educational strategy may cite them.)
+- **Content ratings**: each campaign declares clean / standard / edgy (PG-13).
+  The humor engine's safety gate and all comedy prompts move with the rating —
+  an edgy campaign may ride dark, spiky trends at their native energy instead
+  of sanding them down — while platform ceilings still apply (LinkedIn is
+  always clean) and hard lines (slurs, hate, punching down, tragedy) survive
+  every rating.
+- **Multi-account test lab**: every campaign can post through its own
+  upload-post profile (its own social accounts), with per-campaign daily caps
+  and per-campaign trend sources. The **experiments** layer treats campaigns
+  as A/B variants: create an experiment ("does edgy beat standard for this
+  theme?"), run both accounts, and read the per-variant comparison report
+  (posts, engagement, rewards, leader). This is the summer plan: several test
+  accounts per platform, different themes/ratings/strategies, all feeding the
+  same learning machinery until the system has evolved on real data.
+- **Series are first-class**: episodic strategies keep a series record with
+  per-episode rewards; a series that underperforms baseline three episodes
+  running is retired automatically and a fresh premise is proposed (the kill
+  rule — franchises compound, corpses don't).
+- **Knowledge self-refresh**: a weekly miner reads the audience's own comments
+  and the trend stream, proposes new specificity-bank entries and pain veins
+  in the audience's actual language, retires dated ones — so the raw material
+  that keeps content concrete stops rotting.
 
 ## 7. The web app (what Sanjith actually sees)
 
@@ -437,9 +499,13 @@ There's also a full CLI (`mark generate`, `mark react`, `mark strategies`,
 
 ## 10. Current status
 
-- All of the above is built, tested (59 automated tests, all passing), and
-  verified end-to-end in a real browser session. A 17-agent adversarial code
-  review found 10 real bugs; all were fixed with regression tests.
+- All of the above is built and tested (107 automated tests, all passing,
+  including the closed-loop evolution proof), and verified end-to-end in a
+  real browser session. Two adversarial multi-agent reviews have been run and
+  worked down: a 17-agent code review (10 bugs fixed) and an 8-subsystem
+  audit (July 5, 2026 — 100+ findings; every verified defect fixed, including
+  a rebuild of the learning math itself). See docs/VISION.md for the current
+  gap status.
 - The system currently runs in offline/mock mode — fully functional, spending
   nothing, posting nothing real — until API keys and social accounts are
   connected.

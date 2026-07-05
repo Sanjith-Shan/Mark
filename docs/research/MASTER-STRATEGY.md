@@ -888,3 +888,35 @@ db_new_tables_or_fields:
 8. Product is set dressing, never the punchline.
 9. Optimize sends, saves, completion, replies — not likes.
 10. When in doubt, post nothing; bland trains the algorithm against you.
+
+---
+
+## Addendum (July 5, 2026) — system capabilities added after this spec
+
+These are system-level capabilities encoded in code (this spec remains the
+content-strategy source of truth; these extend WHERE it can be applied):
+
+1. **Content ratings.** Every campaign declares `content_rating: clean |
+   standard | edgy` (src/mark/rating.py). "Edgy" = PG-13: gallows humor, mild
+   profanity, matching a spiky trend's native energy — because a defanged
+   version of an edgy trend reads as corporate cosplay. Platform ceilings
+   still bind (LinkedIn always clean; Bluesky/Reddit cap at standard), the
+   humor benignness gate scales with the rating, and the hard lines in §2.6
+   survive every rating unconditionally.
+2. **Entertainment campaigns** (`kind: entertainment`): content-as-the-business
+   accounts. Strategies marked `requires_product` (§1.5 demo-magic, §1.10
+   social-proof, §1.12 founder-log) are excluded; all others apply with the
+   campaign's own domain briefs.
+3. **Per-campaign strategy briefs.** The §1 briefs here are the SudoApply
+   instance. `mark onboard` generates the equivalent domain-tuned briefs for
+   any new product/theme into `products.strategy_catalog`; the code overlays
+   them on the base catalog. Editing rule stands: strategy MECHANICS change
+   here first; per-campaign INSTANCES live in the campaign's catalog.
+4. **Learning-loop spec upgrade** (supersedes the reward notes in §"Measurement"):
+   graded rewards rate/(rate+platform_baseline), exactly-once crediting at 48h
+   maturity, 45-day evidence half-life, 10% random holdout as a permanent lift
+   control, click-through mixed at 15%. Empirical proof: `mark evolve-proof`.
+5. **Series bookkeeping + kill rule** (implements §1's franchise thinking):
+   3 consecutive sub-baseline episodes retire a series and propose a fresh
+   premise. **Knowledge self-refresh** mines comments/trends into the
+   specificity bank and pain veins weekly (fact base stays human-verified).

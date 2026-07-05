@@ -68,6 +68,60 @@ Concretely, the finished Mark:
 
 ---
 
+## Status after the July 5, 2026 improvement session
+
+A 8-subsystem adversarial audit (100+ findings) was run and worked down. What
+changed — mapped to the vision numbers above:
+
+* **#5 Evolution (the core)** — rewrote the learning math: graded saturation-free
+  rewards (`rate/(rate+baseline)`; a 10x hit ≠ a 1.05x post), per-platform
+  baselines (medians; no more pooled-scale distortion), exactly-once reward
+  crediting at 48h maturity (feedback now safely runs every analytics sweep, not
+  weekly), evidence decay with a 45-day half-life (adaptation to shifts is now
+  mechanically possible), informative strategy priors from the research mix
+  weights, per-platform freshness-windowed winners, same-strategy+view-floor
+  calibration pairs, clicks folded into the reward, analyzer insights fed back
+  into the strategist, and post-time arms that actually gate posting slots.
+  **Empirical proof exists**: `mark evolve-proof` / `scripts/evolution_proof.py`
+  runs the full production loop against a planted hidden audience taste —
+  convergence (0.32→0.55 best-arm share), +23% lift over a permanent random
+  holdout, and re-convergence after a mid-run taste inversion, all PASS; a fast
+  version runs in CI (`tests/test_evolution.py`). A live holdout policy
+  (`learning.holdout_pct`) keeps proving lift forever on real accounts.
+* **#7 Earned autonomy** — `approval.mode: graduated`: auto-approval requires
+  the draft's persisted QA scores AND a per-(strategy, platform) track record;
+  decay revokes autonomy when performance fades. Self-monitoring: engagement-
+  collapse detection pauses a platform with a cool-down + alert, daily spend cap
+  freezes generation. Trend reactions that earn approval post immediately
+  (detection→live in one pass).
+* **#8 Any product** — `mark onboard "<description>"` researches and generates a
+  full campaign: audience model, voice, knowledge pools, per-strategy
+  domain-adapted briefs, trend subreddits/keywords, character concept, rating.
+  fact_base stays empty until human-verified (hard rule).
+* **NEW: content-as-the-business** — campaigns with `kind: entertainment`: no
+  product, no CTA; product-bound strategies excluded; prompts reframe success
+  as watch/share/follow. The summer test lab is supported end-to-end: per-
+  campaign upload-post profiles (accounts), per-campaign caps/trend sources, and
+  an `experiments` layer (campaigns as A/B variants with comparison reports).
+* **NEW: edge calibration** — per-campaign `content_rating` (clean/standard/
+  edgy-PG-13) with platform ceilings (LinkedIn always clean); the humor
+  benignness gate and all comedy prompts move with it. Hard lines (slurs, hate,
+  punching down, tragedy) survive every rating.
+* **Corrections everywhere** — double-posting atomic claim, expiry enforcement
+  on all posting paths, UTM-tagged links (vision #6 attribution opened), karaoke
+  caption fix, multi-shot AI video, chat-drama audio + pacing, franchise
+  carousels, campaign-scoped trends with real velocity math, live-refusal no
+  longer silently posts mock copy, series objects with the 3-strikes kill rule,
+  knowledge self-refresh mining comments into the specificity bank.
+
+Remaining (deliberately): the go-live hardening pass (nothing has hit a real
+API yet — unchanged top priority before the summer lab), trending *sounds* +
+X trends + KnowYourMeme sources, judge fine-tuning once preference pairs
+accumulate, Instagram Trial Reels, and the reply-guy program (blocked on data
+the posting API doesn't provide).
+
+---
+
 ## Gap Audit (July 2026) — one assessment; do your own on top
 
 Ordered roughly by expected impact toward the vision.
