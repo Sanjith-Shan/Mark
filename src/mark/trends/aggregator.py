@@ -292,6 +292,16 @@ def react(app: App, llm: LLM, product: dict, trend: Optional[dict] = None,
                 app.conn, "trend_react",
                 f"Reacted to trend “{trend['topic']}” on {platform}",
                 product_id=product["id"], content_id=row["id"], level="success")
+            # Detection→LIVE in one pass: a reaction that EARNED auto-approval
+            # (graduated QA + track record, or full mode) posts immediately —
+            # waiting for the next optimal-time slot forfeits the trend window,
+            # which is the entire value of reacting. Caps still apply.
+            if row["status"] == "approved":
+                from ..posting import manager
+
+                cap = app.settings.platform(platform).max_posts_per_day
+                if manager.posts_today(app, platform, product_id=product["id"]) < cap:
+                    manager.post_content(app, row)
         except Exception:
             db_module.log_activity(
                 app.conn, "trend_react",

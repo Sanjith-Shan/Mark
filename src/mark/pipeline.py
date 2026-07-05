@@ -293,6 +293,15 @@ def generate_one(app: App, llm: LLM, product: dict, platform: str,
     db_module.log_activity(app.conn, "generate",
                            f"Drafted {plan.content_type} for {platform}: “{draft.hook}”",
                            product_id=product["id"], content_id=content_id)
+    # Series bookkeeping: episodic strategies advance their series record so
+    # numbering, per-series stats, and the kill rule all track reality.
+    if strategy and strategy.series_format:
+        try:
+            from . import series as series_mod
+
+            series_mod.on_content_generated(app, product, strategy, platform)
+        except Exception:
+            pass
     # A draft that is STILL a near-duplicate after the regeneration attempt may
     # never self-approve — a human decides, or it dies in the queue.
     if novelty.ok:

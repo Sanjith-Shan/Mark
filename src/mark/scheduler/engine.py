@@ -250,10 +250,17 @@ def job_cascade(app: App, llm: LLM) -> None:
 
 
 def job_feedback(app: App, llm: LLM) -> None:
-    from ..learning import feedback
+    from .. import series as series_mod
+    from ..learning import feedback, knowledge
 
     for product in _active_products(app):
         _safe(feedback.run, app, llm, product)
+        # Franchise bookkeeping: per-series stats + the kill rule (retire a
+        # series underperforming 3 episodes running, spawn a fresh premise).
+        _safe(series_mod.run_maintenance, app, llm, product)
+        # Knowledge self-refresh: mine fresh audience language from comments
+        # and trends into the specificity bank / pain veins.
+        _safe(knowledge.mine, app, llm, product)
     log.info("ran feedback loop")
 
 
