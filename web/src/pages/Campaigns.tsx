@@ -79,13 +79,14 @@ export default function Campaigns() {
         <span className="muted small">
           {campaigns.length} campaign{campaigns.length === 1 ? "" : "s"} · Mark markets every active one autonomously
         </span>
-        <button className="btn primary" onClick={() => setModal({ open: true, campaign: null })}>
+        <button className="btn primary" data-tour="campaigns-new"
+          onClick={() => setModal({ open: true, campaign: null })}>
           + New campaign
         </button>
       </div>
 
       {campaigns.length === 0 ? (
-        <Card>
+        <Card dataTour="campaigns-list">
           <Empty
             icon="🚩"
             title="No campaigns yet"
@@ -98,7 +99,8 @@ export default function Campaigns() {
           />
         </Card>
       ) : (
-        <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))" }}>
+        <div className="grid" data-tour="campaigns-list"
+          style={{ gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))" }}>
           {campaigns.map((c) => (
             <CampaignCard
               key={c.id}

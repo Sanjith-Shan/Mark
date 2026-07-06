@@ -1,5 +1,6 @@
 import { NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { GlobalProvider, useGlobal } from "./store";
+import { TourProvider, useTour } from "./tour/Tour";
 import Dashboard from "./pages/Dashboard";
 import Campaigns from "./pages/Campaigns";
 import Studio from "./pages/Studio";
@@ -54,7 +55,9 @@ const TITLES: Record<string, string> = {
 export default function App() {
   return (
     <GlobalProvider>
-      <Shell />
+      <TourProvider>
+        <Shell />
+      </TourProvider>
     </GlobalProvider>
   );
 }
@@ -85,6 +88,7 @@ function Shell() {
             )}
           </NavLink>
         ))}
+        <TutorialButton />
         <div className="sidebar-foot">
           Marketing on autopilot,
           <br />so you can keep building.
@@ -94,8 +98,8 @@ function Shell() {
         <header className="topbar">
           <h1>{TITLES[loc.pathname] ?? "Mark"}</h1>
           <div className="topbar-spacer" />
-          <AutopilotIndicator />
-          <ProviderDots />
+          <span data-tour="autopilot-toggle"><AutopilotIndicator /></span>
+          <span data-tour="providers"><ProviderDots /></span>
         </header>
         <div className="content">
           <div className="content-inner">
@@ -114,6 +118,20 @@ function Shell() {
         </div>
       </div>
     </div>
+  );
+}
+
+function TutorialButton() {
+  const { start, seen, active } = useTour();
+  if (active) return null;
+  return (
+    <button className="tour-nav-btn" onClick={start} data-tour-start
+      title="A guided walkthrough of every page">
+      <span className={`dot ${seen ? "" : "green pulse"}`}
+        style={seen ? { background: "var(--text-faint)" } : undefined} />
+      <span style={{ flex: 1, textAlign: "left" }}>Tutorial</span>
+      {!seen && <span className="pill accent" style={{ fontSize: 10, padding: "1px 7px" }}>new</span>}
+    </button>
   );
 }
 

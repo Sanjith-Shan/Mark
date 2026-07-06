@@ -48,7 +48,7 @@ export default function Studio() {
 
   return (
     <>
-      <div className="row wrap between">
+      <div className="row wrap between" data-tour="studio-tabs">
         <div className="tabs">
           {STATUSES.map((s) => (
             <button key={s} className={`tab ${tab === s ? "active" : ""}`} onClick={() => setTab(s)}>
@@ -68,7 +68,8 @@ export default function Studio() {
             <option value="">All platforms</option>
             {ALL_PLATFORMS.map((p) => <option key={p} value={p}>{PLATFORM_LABELS[p] ?? p}</option>)}
           </select>
-          <button className="btn primary" onClick={() => setGenOpen(true)}>✨ Generate</button>
+          <button className="btn primary" data-tour="studio-generate"
+            onClick={() => setGenOpen(true)}>✨ Generate</button>
         </div>
       </div>
 

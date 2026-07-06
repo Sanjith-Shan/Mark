@@ -4,6 +4,7 @@ import { api } from "../api";
 import { useGlobal } from "../store";
 import { ALL_PLATFORMS, PLATFORM_LABELS } from "../types";
 import { Card, Empty, Pill, Spinner, Switch, fmt } from "../components/ui";
+import { useTour } from "../tour/Tour";
 
 interface LlmSettings {
   text_model: string;
@@ -231,7 +232,7 @@ function SettingsLoaded(props: {
     <>
       <div className="grid cols-2" style={{ alignItems: "start" }}>
         {/* 1. Providers */}
-        <Card title="Providers">
+        <Card title="Providers" dataTour="settings-providers">
           <div className="stack" style={{ gap: 12 }}>
             {PROVIDERS.map((p) => {
               const mode = status?.providers?.[p.key] ?? "mock";
@@ -439,7 +440,7 @@ function SettingsLoaded(props: {
         </Card>
 
         {/* 7. Humor engine */}
-        <Card title="Humor engine"
+        <Card title="Humor engine" dataTour="settings-humor"
           action={<SaveBtn saving={humorSave.saving} onClick={() => humorSave.save(humor)} />}>
           <div className="stack" style={{ gap: 14 }}>
             <div className="row between">
@@ -569,7 +570,7 @@ function SettingsLoaded(props: {
         </Card>
 
         {/* 9. Learning */}
-        <Card title="Learning"
+        <Card title="Learning" dataTour="settings-learning"
           action={<SaveBtn saving={learningSave.saving} onClick={() => learningSave.save(learning)} />}>
           <div className="stack" style={{ gap: 14 }}>
             <div className="grid cols-2">
@@ -606,7 +607,32 @@ function SettingsLoaded(props: {
 
       {/* 9. Spend */}
       <SpendCard costs={costs} />
+
+      <TutorialCard />
     </>
+  );
+}
+
+function TutorialCard() {
+  const { start, seen } = useTour();
+  return (
+    <Card title="Tutorial" dataTour="settings-tutorial">
+      <div className="row between wrap" style={{ gap: 14 }}>
+        <div style={{ maxWidth: 560 }}>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>
+            Guided tour of the whole app
+          </div>
+          <div className="small muted">
+            Walks every page step by step — what each screen does, how the content
+            pipeline, trend radar, and learning loop work, and what to click first.
+            {seen ? " You've taken it before — restart any time." : " Takes about 5 minutes."}
+          </div>
+        </div>
+        <button className="btn primary" onClick={start} data-tour-start-settings>
+          {seen ? "↻ Restart tutorial" : "▶ Start tutorial"}
+        </button>
+      </div>
+    </Card>
   );
 }
 

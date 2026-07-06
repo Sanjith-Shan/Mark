@@ -444,6 +444,10 @@ Local web app (`mark web`), pages:
 There's also a full CLI (`mark generate`, `mark react`, `mark strategies`,
 `mark character sync`, etc.) for scripting.
 
+A **guided tour** (27 steps) walks every page and explains the whole machine —
+start it from the "Tutorial" button at the bottom of the sidebar or from
+Settings → Tutorial; ← → keys navigate, Esc exits.
+
 ---
 
 ## 8. Guardrails — what it deliberately won't do

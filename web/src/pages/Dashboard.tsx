@@ -40,7 +40,7 @@ export default function Dashboard() {
 
   return (
     <>
-      <div className="grid cols-4">
+      <div className="grid cols-4" data-tour="dash-stats">
         <Card><Stat value={running.length} label="Campaigns running"
           sub={<Link to="/campaigns">manage →</Link>} /></Card>
         <Card><Stat value={status?.counts?.draft ?? 0} label="Drafts awaiting review"
@@ -76,7 +76,7 @@ export default function Dashboard() {
           )}
         </Card>
 
-        <Card title="Activity">
+        <Card title="Activity" dataTour="dash-activity">
           <div className="feed" style={{ maxHeight: 246, overflowY: "auto" }}>
             {(ov?.activity ?? []).length === 0 && (
               <Empty icon="🕰" title="Nothing yet" hint="System actions appear here as they happen." />
@@ -142,7 +142,7 @@ export default function Dashboard() {
 function QuickActions({ onDone }: { onDone: () => void }) {
   const { runJob } = useGlobal();
   return (
-    <Card title="Quick actions">
+    <Card title="Quick actions" dataTour="dash-actions">
       <div className="row wrap">
         <button className="btn primary" onClick={() => runJob(() => api.post("/api/generate", {}))}>
           ✨ Generate today's content

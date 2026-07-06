@@ -2,9 +2,12 @@
 import { ReactNode } from "react";
 import { PLATFORM_COLORS, PLATFORM_LABELS } from "../types";
 
-export function Card(props: { title?: ReactNode; action?: ReactNode; children: ReactNode; className?: string }) {
+export function Card(props: {
+  title?: ReactNode; action?: ReactNode; children: ReactNode; className?: string;
+  dataTour?: string; // anchor for the guided tour (tour/steps.ts)
+}) {
   return (
-    <div className={`card ${props.className ?? ""}`}>
+    <div className={`card ${props.className ?? ""}`} data-tour={props.dataTour}>
       {props.title != null && (
         <div className="card-title">
           <span>{props.title}</span>

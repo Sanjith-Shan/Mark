@@ -46,7 +46,7 @@ export default function Learn() {
         </button>
       </div>
 
-      <div className="grid cols-3">
+      <div className="grid cols-3" data-tour="learn-stats">
         <Card><Stat value={data?.winners ?? 0} label="Winners indexed"
           sub="top posts reused as examples" /></Card>
         <Card><Stat value={bandit.length} label="Bandit arms tried"
@@ -162,7 +162,7 @@ export default function Learn() {
             </Card>
           </div>
 
-          <Card title="Bandit leaderboard">
+          <Card title="Bandit leaderboard" dataTour="learn-bandit">
             {bandit.length === 0 ? (
               <Empty icon="🎰" title="No arms pulled yet"
                 hint="Each content choice (hook style, tone, timing…) becomes an arm the bandit learns to favor." />
@@ -263,7 +263,7 @@ function ExperimentsSection() {
   };
 
   return (
-    <Card title="Experiments · A/B test lab"
+    <Card title="Experiments · A/B test lab" dataTour="learn-experiments"
       action={
         <button className="btn sm" onClick={() => setCreating((v) => !v)}>
           {creating ? "Cancel" : "+ New experiment"}

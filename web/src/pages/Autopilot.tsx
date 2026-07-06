@@ -89,7 +89,7 @@ export default function Autopilot() {
   return (
     <>
       {/* ---- hero ---- */}
-      <Card>
+      <Card dataTour="autopilot-master">
         <div className="row between wrap" style={{ gap: 18 }}>
           <div className="row" style={{ gap: 16 }}>
             <span
@@ -152,7 +152,7 @@ export default function Autopilot() {
         </Card>
 
         {/* ---- upcoming runs ---- */}
-        <Card title="Upcoming runs">
+        <Card title="Upcoming runs" dataTour="autopilot-upcoming">
           {ap == null ? (
             <div className="row" style={{ justifyContent: "center", padding: 24 }}>
               <Spinner />

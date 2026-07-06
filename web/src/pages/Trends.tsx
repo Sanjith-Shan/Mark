@@ -37,7 +37,7 @@ export default function Trends() {
         </select>
         <span className="small faint">relevance is scored against the selected campaign</span>
         <div style={{ flex: 1 }} />
-        <button className="btn primary"
+        <button className="btn primary" data-tour="trends-refresh"
           onClick={() => runJob(() => api.post(`/api/trends/refresh?campaign=${encodeURIComponent(campaign)}`))}>
           🔥 Refresh trends
         </button>
@@ -78,7 +78,7 @@ export default function Trends() {
         </Card>
       )}
 
-      <Card title="Trending now">
+      <Card title="Trending now" dataTour="trends-table">
         {trends.length === 0 ? (
           <Empty icon="🔥" title="No trend data yet"
             hint="Hit “Refresh trends” to pull trending topics from TikTok and Google, scored for relevance to your campaign." />

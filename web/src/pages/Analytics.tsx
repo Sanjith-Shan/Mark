@@ -79,7 +79,7 @@ export default function Analytics() {
         </button>
       </div>
 
-      <div className="grid cols-4">
+      <div className="grid cols-4" data-tour="analytics-totals">
         <Card><Stat value={fmt(totals?.views)} label="Views" /></Card>
         <Card><Stat value={fmt(totals?.likes)} label="Likes" /></Card>
         <Card><Stat value={fmt((totals?.comments ?? 0) + (totals?.shares ?? 0))} label="Comments + shares" /></Card>
@@ -126,7 +126,7 @@ export default function Analytics() {
         )}
       </Card>
 
-      <Card title="Top content">
+      <Card title="Top content" dataTour="analytics-top">
         {table.length === 0 ? (
           <Empty icon="🏆" title="Nothing to rank yet"
             hint="Posted content shows up here ranked by engagement once metrics are in." />

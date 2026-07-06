@@ -99,7 +99,8 @@ export default function Playbook() {
       ) : strategies.length === 0 ? (
         <Card><Empty icon="📖" title="No strategies in the catalog" /></Card>
       ) : (
-        <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))" }}>
+        <div className="grid" data-tour="playbook-strategies"
+          style={{ gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))" }}>
           {strategies.map((s) => (
             <StrategyCard key={s.id} strategy={s}
               onToggle={(on) => toggleStrategy(s.id, on)} />
@@ -108,7 +109,7 @@ export default function Playbook() {
       )}
 
       {/* ---------- characters ---------- */}
-      <Card title="Characters"
+      <Card title="Characters" dataTour="playbook-characters"
         action={
           <button className="btn sm" disabled={syncing} onClick={syncCharacters}>
             {syncing ? "Syncing…" : "⟳ Sync from config"}
