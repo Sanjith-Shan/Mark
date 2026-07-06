@@ -114,11 +114,24 @@ changed — mapped to the vision numbers above:
   longer silently posts mock copy, series objects with the 3-strikes kill rule,
   knowledge self-refresh mining comments into the specificity bank.
 
-Remaining (deliberately): the go-live hardening pass (nothing has hit a real
-API yet — unchanged top priority before the summer lab), trending *sounds* +
-X trends + KnowYourMeme sources, judge fine-tuning once preference pairs
-accumulate, Instagram Trial Reels, and the reply-guy program (blocked on data
-the posting API doesn't provide).
+* **NEW (July 5, later): the humor radar** — after evaluating the humor
+  engine's output, the owner shelved LLM-written jokes as not-yet-funny-enough
+  and pivoted entertainment accounts to CURATION: `src/mark/humor_radar.py`
+  polls meme subreddits, Tenor trending, Imgflip template rankings and
+  KnowYourMeme every 30 minutes, judges each find (funny/copyable/safe),
+  velocity-stages it, and turns winners into credited repost drafts —
+  entertainment campaigns only, never self-approving, 48h expiry. Verified
+  against the LIVE endpoints (real memes flowed same-day); Reddit works
+  anonymously via paced RSS, upgraded by free API creds. The LLM humor engine
+  remains built + wired for product campaigns; its bar is now explicit: beat
+  curation.
+
+Remaining (deliberately): the go-live hardening pass (posting/media/LLM paths
+have still never hit a real API — unchanged top priority before the summer
+lab; the humor-radar sources are now the exception, verified live), trending
+*sounds* + X trends, judge fine-tuning once preference pairs accumulate,
+Instagram Trial Reels, and the reply-guy program (blocked on data the posting
+API doesn't provide).
 
 ---
 

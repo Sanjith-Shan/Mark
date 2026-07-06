@@ -184,6 +184,30 @@ CREATE TABLE IF NOT EXISTS characters (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Humor radar: copyworthy humor sighted in the wild (memes, formats, GIFs).
+-- One row per sighting (like trends) so velocity is computable; external_id
+-- identifies the same item across sightings.
+CREATE TABLE IF NOT EXISTS humor_finds (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL,              -- "reddit", "tenor", "imgflip", "kym"
+    external_id TEXT NOT NULL,         -- stable per item (post id / gif id / slug)
+    title TEXT NOT NULL,               -- the joke text / meme name
+    media_url TEXT,                    -- direct image/gif/video URL (nullable: formats)
+    media_type TEXT,                   -- "image", "gif", "video", "template"
+    permalink TEXT,                    -- canonical page (credit + provenance)
+    author TEXT,                       -- creator handle for credit
+    community TEXT,                    -- subreddit / tag / collection
+    raw_score REAL DEFAULT 0.0,        -- source-native popularity (0-100 normalized)
+    funny REAL,                        -- judge: how funny 0..1
+    copyability REAL,                  -- judge: works standalone, easy to ride 0..1
+    safe INTEGER DEFAULT 1,            -- 0 = nsfw/tragedy/unclear origin — never use
+    velocity REAL,                     -- raw_score delta vs sightings 2-48h ago
+    stage TEXT,                        -- "new", "rising", "mature", "declining"
+    metadata TEXT,                     -- JSON extras (ups, template_id, …)
+    collected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_humor_ext ON humor_finds(external_id, collected_at);
+
 -- Small key/value store for learning bookkeeping (last decay pass, etc.).
 CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,

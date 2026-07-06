@@ -652,6 +652,53 @@ def build_router(rt: Runtime) -> APIRouter:
 
         return aggregator.hot_trends(rt.app(), limit=limit, for_auto_react=False)
 
+    # ------------------------------------------------------------------ #
+    # Humor radar — curated copyworthy humor (entertainment campaigns)
+    # ------------------------------------------------------------------ #
+    @r.get("/humor")
+    def humor_finds(campaign: Optional[str] = None, limit: int = 12) -> list[dict]:
+        from .. import humor_radar
+        from ..llm import LLM
+
+        app = rt.app()
+        product = store.get_product(app.conn, campaign) if campaign else None
+        return humor_radar.radar(app, LLM(app), campaign=product, limit=limit)
+
+    @r.post("/humor/refresh")
+    def refresh_humor() -> dict:
+        def _run(app, llm, job, report):
+            from .. import humor_radar
+
+            report(0.2, "Polling humor sources…")
+            out = humor_radar.refresh(app, llm)
+            report(1.0, f"Scored {len(out)} finds")
+            db_module.log_activity(app.conn, "humor_radar",
+                                   f"Humor radar refreshed: {len(out)} finds")
+            return {"count": len(out)}
+
+        job = rt.jobs.submit("humor", "Refresh humor radar", _run)
+        return {"job_id": job.id}
+
+    class HumorDraftIn(BaseModel):
+        campaign_id: str
+        platform: str = "x"
+
+    @r.post("/humor/{find_id}/draft")
+    def humor_draft(find_id: int, body: HumorDraftIn) -> dict:
+        from .. import humor_radar
+        from ..llm import LLM
+
+        app = rt.app()
+        product = store.get_product(app.conn, body.campaign_id)
+        if not product:
+            raise HTTPException(404, f"campaign {body.campaign_id!r} not found")
+        try:
+            row = humor_radar.draft_repost(app, LLM(app), product, find_id,
+                                           platform=body.platform)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        return content_out(row)
+
     class ReactIn(BaseModel):
         campaign_id: Optional[str] = None
         topic: Optional[str] = None            # default: hottest qualifying trend

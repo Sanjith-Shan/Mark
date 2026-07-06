@@ -331,3 +331,26 @@ export const PLATFORM_LABELS: Record<string, string> = {
   reddit: "Reddit",
   pinterest: "Pinterest",
 };
+
+/** A copyworthy humor sighting from the humor radar (memes, GIFs, formats). */
+export interface HumorFind {
+  id: number;
+  source: string;                 // "reddit" | "tenor" | "imgflip" | "kym"
+  external_id: string;
+  title: string;
+  media_url: string | null;       // null = format/template signal, not postable
+  media_type: string | null;      // "image" | "gif" | "video" | "template"
+  permalink: string | null;
+  author: string | null;
+  community: string | null;
+  raw_score: number;
+  funny: number | null;           // judge: 0..1
+  copyability: number | null;     // judge: 0..1
+  safe: number;
+  velocity: number | null;
+  stage: string | null;
+  metadata: Record<string, unknown>;
+  collected_at: string;
+  radar_score: number;            // blended ranking score
+  post_now: boolean;              // fresh + rising + funny + postable
+}

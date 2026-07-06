@@ -184,12 +184,18 @@ def job_trends_fast(app: App, llm: LLM) -> None:
     """The 30-minute pulse: free, hours-fresh sources only (Reddit rising,
     Bluesky trending, Google RSS). Auto-react fires from here too — this is
     where detection→live in 2-6 hours actually happens."""
+    from .. import humor_radar
     from ..trends import aggregator
 
     for product in _active_products(app):
         _safe(aggregator.refresh_fast, app, llm, product)
         if app.settings.trends.auto_react:
             _safe(aggregator.react, app, llm, product)
+    # Humor radar rides the same pulse: memes move on the same clock as trends.
+    if app.settings.humor_radar.enabled:
+        _safe(humor_radar.refresh, app, llm)
+        for product in _active_products(app):
+            _safe(humor_radar.auto_draft, app, llm, product)
     _safe(aggregator.expire_stale_content, app)
     _safe(aggregator.purge_old_trends, app)
     log.info("fast trend poll done")

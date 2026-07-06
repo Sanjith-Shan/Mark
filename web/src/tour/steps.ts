@@ -174,6 +174,19 @@ export const TOUR_STEPS: TourStep[] = [
       + "drafts expire in 24-72h so it's mechanically impossible to post a dead meme.",
   },
 
+  {
+    route: "/trends", target: "[data-tour='humor-radar']", pageLabel: "Trends",
+    title: "The humor radar: copy what's already funny",
+    body: "Writing jokes is hard; knowing what the internet finds funny RIGHT NOW is a "
+      + "solved problem. The radar polls meme subreddits, Tenor's trending GIFs (what people "
+      + "actually send each other), live meme-template rankings, and KnowYourMeme — then a "
+      + "judge scores every find for funniness, copyability, and safety, and velocity "
+      + "tracking vetoes anything past its peak."
+      + "\n\n'Draft repost' turns a find into a credited draft — for ENTERTAINMENT campaigns "
+      + "only (brand accounts reposting memes is a copyright exposure and an algorithm "
+      + "killer). Reposts never self-approve and expire within 48h so a dead meme can't ship.",
+  },
+
   // ------------------------------------------------------------ playbook --
   {
     route: "/playbook", target: "[data-tour='playbook-strategies']", pageLabel: "Playbook",

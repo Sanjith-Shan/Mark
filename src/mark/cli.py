@@ -933,5 +933,73 @@ def evolve_proof(
     raise typer.Exit(code=0 if ok else 1)
 
 
+# --------------------------------------------------------------------------- #
+# humor radar — curated copyworthy humor (entertainment campaigns)
+# --------------------------------------------------------------------------- #
+@app.command()
+def humor(
+    ctx: typer.Context,
+    refresh: bool = typer.Option(False, "--refresh", help="Poll the sources before showing the radar."),
+    product: Optional[str] = typer.Option(None, "--product", "-p", help="Score theme-fit against this campaign."),
+    limit: int = typer.Option(12, "--limit", "-n"),
+):
+    """The humor radar: what the internet finds funny right now, ranked."""
+    from . import humor_radar
+    from .llm import LLM
+
+    a = _app(ctx)
+    llm = LLM(a)
+    if refresh:
+        with console.status("[bold]Polling humor sources…[/]"):
+            humor_radar.refresh(a, llm)
+    campaign = store.get_product(a.conn, product) if product else None
+    finds = humor_radar.radar(a, llm, campaign=campaign, limit=limit)
+    if not finds:
+        console.print("[yellow]Radar is empty.[/] Run [bold]mark humor --refresh[/] first.")
+        raise typer.Exit()
+    table = Table(title="Humor radar — copyworthy right now")
+    table.add_column("id", justify="right")
+    table.add_column("post?", justify="center")
+    table.add_column("score", justify="right")
+    table.add_column("funny", justify="right")
+    table.add_column("stage")
+    table.add_column("source")
+    table.add_column("title")
+    for f in finds:
+        table.add_row(str(f["id"]), "🟢" if f["post_now"] else "",
+                      f"{f['radar_score']:.2f}", f"{(f.get('funny') or 0):.2f}",
+                      f.get("stage") or "?", f"{f['source']}/{f.get('community') or ''}",
+                      (f["title"] or "")[:64])
+    console.print(table)
+    console.print("Draft one with [bold]mark humor-draft <id> --product <entertainment-campaign>[/]")
+
+
+@app.command("humor-draft")
+def humor_draft(
+    ctx: typer.Context,
+    find_id: int,
+    product: Optional[str] = typer.Option(None, "--product", "-p", help="Entertainment campaign id."),
+    platform: str = typer.Option("x", "--platform"),
+):
+    """Draft a credited repost of a humor find (entertainment campaigns only;
+    never auto-approved; expires with the meme's freshness window)."""
+    from . import humor_radar
+    from .llm import LLM
+
+    a = _app(ctx)
+    prod = _resolve_product_or_exit(a, product)
+    try:
+        row = humor_radar.draft_repost(a, LLM(a), prod, find_id, platform=platform)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/]")
+        raise typer.Exit(code=1)
+    console.print(Panel.fit(
+        f"drafted content [bold]#{row['id']}[/] for {platform}\n"
+        f"caption: {(row['caption'] or '')[:120]}\n"
+        f"expires: {row['expires_at']} UTC (meme window)\n"
+        "review + approve it in the Studio — reposts never self-approve",
+        title="curated repost"))
+
+
 if __name__ == "__main__":
     app()

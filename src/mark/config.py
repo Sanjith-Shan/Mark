@@ -142,6 +142,21 @@ class TrendsConfig(_Base):
     ])                                  # niche subs polled for rising posts (early-warning + material)
 
 
+class HumorRadarConfig(_Base):
+    """Curated-humor discovery — find what the internet finds funny RIGHT NOW
+    and ride it, instead of writing jokes from scratch. Entertainment
+    campaigns only; reposts always credit, never self-approve, and expire."""
+
+    enabled: bool = True
+    subreddits: list[str] = Field(default_factory=lambda: [
+        "memes", "dankmemes", "me_irl", "wholesomememes", "shitposting",
+    ])                                  # meme communities polled for rising humor
+    auto_draft: bool = False            # top find → repost draft automatically
+    max_drafts_per_day: int = 2         # per entertainment campaign
+    min_funny: float = 0.6              # judge gate for auto-drafting
+    draft_ttl_hours: int = 48           # meme freshness window — expire unposted drafts
+
+
 class Settings(_Base):
     """The whole of ``default.yaml``."""
 
@@ -155,6 +170,7 @@ class Settings(_Base):
     humor: HumorConfig = Field(default_factory=HumorConfig)
     learning: LearningConfig = Field(default_factory=LearningConfig)
     safety: SafetyConfig = Field(default_factory=SafetyConfig)
+    humor_radar: HumorRadarConfig = Field(default_factory=HumorRadarConfig)
 
     def enabled_platforms(self) -> list[str]:
         return [name for name, p in self.platforms.items() if p.enabled]

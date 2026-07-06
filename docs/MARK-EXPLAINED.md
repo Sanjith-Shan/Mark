@@ -379,6 +379,28 @@ post performance in month one is noise.
 
 ---
 
+## 6.4 The humor radar — copy what's already funny
+
+The LLM-written-joke lane is real but unproven, so entertainment accounts have
+a second lane that needs no genius: **curation**. The humor radar polls, every
+30 minutes on autopilot, the places where the internet ranks its own humor in
+real time — big meme subreddits (hot + rising), Tenor's trending GIFs (the
+data behind "GIF Keyboard": literally what people are sending each other),
+Imgflip's live meme-template rankings, and KnowYourMeme's trending set. Every
+sighting is judged (how funny, does it work standalone, is its origin safe),
+velocity-tracked across sightings exactly like trends, and ranked; anything
+declining or unsafe is vetoed.
+
+The best finds become **credited repost drafts** at one click (or
+automatically, with `humor_radar.auto_draft` on). Non-negotiable rules:
+entertainment campaigns ONLY (a brand account reposting memes is a copyright
+exposure and the documented algorithm-killer), reposts NEVER self-approve
+(provenance and taste are human calls), credit is always carried, and drafts
+expire within 48 hours so a dead meme can never ship. Reddit access works
+anonymously via politely-paced public feeds; adding free Reddit API
+credentials (and optionally a Tenor key) upgrades the signal quality — see
+`.env.example`.
+
 ## 6.5 Beyond one product — campaigns, accounts, experiments
 
 Mark is no longer bound to marketing one product:

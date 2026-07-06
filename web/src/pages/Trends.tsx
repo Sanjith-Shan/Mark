@@ -1,8 +1,9 @@
-// Trends — ranked trending topics scored for relevance to a campaign.
+// Trends — ranked trending topics scored for relevance to a campaign,
+// plus the humor radar: copyworthy humor sighted in the wild.
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { useGlobal } from "../store";
-import { Trend } from "../types";
+import { HumorFind, Trend } from "../types";
 import { Card, Empty, Pill, pct, timeAgo } from "../components/ui";
 
 export default function Trends() {
@@ -10,10 +11,12 @@ export default function Trends() {
   const [campaign, setCampaign] = useState("");
   const [trends, setTrends] = useState<Trend[]>([]);
   const [hot, setHot] = useState<Trend[]>([]);
+  const [humor, setHumor] = useState<HumorFind[]>([]);
 
   const load = () => {
     api.get<Trend[]>("/api/trends?limit=30").then(setTrends).catch(() => {});
     api.get<Trend[]>("/api/trends/hot?limit=5").then(setHot).catch(() => {});
+    api.get<HumorFind[]>("/api/humor?limit=12").then(setHumor).catch(() => {});
   };
   useEffect(() => { load(); }, []);
   useEffect(() => {
@@ -78,6 +81,8 @@ export default function Trends() {
         </Card>
       )}
 
+      <HumorRadar finds={humor} />
+
       <Card title="Trending now" dataTour="trends-table">
         {trends.length === 0 ? (
           <Empty icon="🔥" title="No trend data yet"
@@ -132,6 +137,93 @@ export default function Trends() {
         )}
       </Card>
     </>
+  );
+}
+
+function HumorRadar({ finds }: { finds: HumorFind[] }) {
+  const { campaigns, toast, runJob } = useGlobal();
+  const entertainment = campaigns.filter((c) => c.kind === "entertainment" && c.active);
+  const [target, setTarget] = useState("");
+  const targetId = target || entertainment[0]?.id || "";
+
+  const draft = async (f: HumorFind) => {
+    if (!targetId) return;
+    try {
+      await api.post(`/api/humor/${f.id}/draft`, { campaign_id: targetId });
+      toast(`repost drafted for ${targetId} — review it in the Studio`);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "draft failed", "error");
+    }
+  };
+
+  return (
+    <Card title="Humor radar · copyworthy right now" dataTour="humor-radar"
+      action={
+        <div className="row" style={{ gap: 8 }}>
+          {entertainment.length > 1 && (
+            <select className="input" style={{ width: 170, padding: "4px 8px", fontSize: 12 }}
+              value={targetId} onChange={(e) => setTarget(e.target.value)}>
+              {entertainment.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          )}
+          <button className="btn sm"
+            onClick={() => runJob(() => api.post("/api/humor/refresh"))}>
+            😂 Refresh
+          </button>
+        </div>
+      }>
+      {finds.length === 0 ? (
+        <Empty icon="😂" title="Radar is empty"
+          hint="Hit Refresh — it polls meme subreddits, Tenor trending, and live meme-template rankings, then scores every find for funniness and freshness." />
+      ) : (
+        <>
+          {entertainment.length === 0 && (
+            <div className="small faint" style={{ marginBottom: 10 }}>
+              ⚠ Reposts are for <b>entertainment campaigns only</b> (a brand account
+              reposting memes is a copyright exposure and an algorithm-killer).
+              Create a campaign with kind = entertainment to draft from here.
+            </div>
+          )}
+          <div className="stack" style={{ gap: 0 }}>
+            {finds.map((f, i) => (
+              <div key={f.id} className="row wrap"
+                style={{ padding: "10px 0", borderBottom: i < finds.length - 1 ? "1px solid var(--border)" : undefined }}>
+                {f.media_url ? (
+                  <a href={f.permalink ?? f.media_url} target="_blank" rel="noreferrer">
+                    <img src={f.media_url} alt="" loading="lazy"
+                      style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 8, background: "var(--bg-raised)" }} />
+                  </a>
+                ) : (
+                  <div style={{ width: 56, height: 56, borderRadius: 8, background: "var(--bg-raised)",
+                    display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>🧩</div>
+                )}
+                <div style={{ flex: 1, minWidth: 220 }}>
+                  <div className="row wrap" style={{ gap: 8 }}>
+                    {f.post_now && <Pill kind="live">post now</Pill>}
+                    <span style={{ fontWeight: 600 }}>{f.title}</span>
+                  </div>
+                  <div className="row wrap small faint" style={{ gap: 10, marginTop: 3 }}>
+                    <span>{f.source}{f.community ? ` · ${f.community}` : ""}</span>
+                    <StageBadge stage={f.stage as Trend["stage"]} />
+                    <span title="judge: how funny">😂 {((f.funny ?? 0) * 100).toFixed(0)}%</span>
+                    <span title="blended radar score">◎ {(f.radar_score * 100).toFixed(0)}</span>
+                    {f.author && <span>{f.author}</span>}
+                  </div>
+                </div>
+                {f.media_url && (
+                  <button className="btn primary sm" disabled={!targetId}
+                    title={targetId ? "Create a credited repost draft (review in Studio)"
+                      : "Needs an active entertainment campaign"}
+                    onClick={() => draft(f)}>
+                    📋 Draft repost
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </Card>
   );
 }
 

@@ -125,3 +125,13 @@ safety:
   collapse_threshold: 0.28      # avg graded reward below this = collapse → pause
   pause_hours: 48               # platform cool-down after a collapse
   max_daily_spend_usd: 25.0     # freeze generation past this (real spend only)
+
+# --- Humor radar (curated copyworthy humor; entertainment campaigns) -------- #
+humor_radar:
+  enabled: true
+  subreddits: [memes, dankmemes, me_irl, wholesomememes, shitposting]
+  auto_draft: false           # top finds → repost drafts automatically (drafts only,
+                              # approval always stays human)
+  max_drafts_per_day: 2       # per entertainment campaign
+  min_funny: 0.6              # judge gate for auto-drafting
+  draft_ttl_hours: 48         # unposted repost drafts expire (meme freshness window)
