@@ -208,6 +208,57 @@ CREATE TABLE IF NOT EXISTS humor_finds (
 );
 CREATE INDEX IF NOT EXISTS idx_humor_ext ON humor_finds(external_id, collected_at);
 
+-- Livestream clip radar: one row per clip sighting (humor_finds pattern).
+CREATE TABLE IF NOT EXISTS stream_finds (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL,              -- "twitch", "kick", "youtube"
+    external_id TEXT NOT NULL,         -- clip id (stable per item)
+    streamer TEXT,                     -- broadcaster login/handle
+    title TEXT,
+    clip_url TEXT,                     -- canonical clip page
+    game TEXT,                         -- category/game name
+    view_count INTEGER DEFAULT 0,
+    vod_offset INTEGER,                -- seconds into the VOD (cluster signal)
+    duration REAL,
+    keep REAL,                         -- judge: clip-worthiness 0..1
+    hook_text TEXT,                    -- judge: suggested first-frame hook
+    safe INTEGER DEFAULT 1,            -- 0 = licensed music / unsafe — never use
+    velocity REAL,                     -- view-count delta vs earlier sightings
+    stage TEXT,                        -- "new", "rising", "mature", "declining"
+    campaign_id INTEGER,               -- clip_campaigns.id when campaign-covered
+    downloaded_path TEXT,              -- local mp4 once fetched
+    metadata TEXT,                     -- JSON extras (crop rects, transcript, …)
+    collected_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_stream_ext ON stream_finds(external_id, collected_at);
+
+-- Paid clipping campaigns discovered on ContentRewards/Whop etc. Joining,
+-- posting and submitting are ALWAYS human actions (platform ToS) — this table
+-- only powers discovery, ranking and tracking.
+CREATE TABLE IF NOT EXISTS clip_campaigns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    platform TEXT NOT NULL,            -- "contentrewards", "whop", ...
+    external_id TEXT NOT NULL,         -- campaign id on the platform
+    title TEXT,
+    brand TEXT,
+    url TEXT,
+    category TEXT,                     -- niche: streamer/music/app/gambling/...
+    cpm REAL,                          -- $ per 1000 views
+    budget REAL,
+    budget_used REAL,
+    creators INTEGER,                  -- competition: joined creator count
+    platforms TEXT,                    -- JSON: allowed posting platforms
+    requirements TEXT,                 -- JSON: extracted hard rules from brief
+    ev_score REAL,                     -- expected-value ranking score
+    blocked INTEGER DEFAULT 0,         -- brand-safety block (gambling etc.)
+    joined INTEGER DEFAULT 0,          -- user marked as joined (human action)
+    status TEXT DEFAULT 'open',        -- "open", "ended", "paused"
+    first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    metadata TEXT                      -- JSON extras (raw listing payload)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_campaign_ext ON clip_campaigns(platform, external_id);
+
 -- Small key/value store for learning bookkeeping (last decay pass, etc.).
 CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
@@ -300,6 +351,9 @@ MIGRATIONS: list[tuple[str, str, str]] = [
     ("products", "trend_sources", "TEXT"),     # JSON: {subreddits: [], keywords: []} per-campaign radar
     ("products", "strategy_catalog", "TEXT"),  # JSON: campaign-adapted strategy briefs (onboarding output)
     ("trends", "product_id", "TEXT"),          # campaign scoping — relevance is per-campaign
+    # Clip-economy build: EDL sidecar per video content + character identity packs.
+    ("content", "edl_path", "TEXT"),           # edit.json path — source of truth for the clip/caption editor
+    ("characters", "identity", "TEXT"),        # JSON identity pack: lora_url, arcface path, voice_id, refs
 ]
 
 

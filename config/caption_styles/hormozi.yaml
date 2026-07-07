@@ -1,0 +1,21 @@
+# Hormozi-style captions — the benchmark look for business/educational clips:
+# ALL-CAPS heavy sans, thick black outline, gold highlight on the active word.
+# Colors are ASS &HAABBGGRR (BGR, not RGB!). font_size is for a 1920-high
+# canvas and scales with the actual canvas height.
+font: Montserrat ExtraBold
+font_size: 84
+primary_color: "&H00FFFFFF"    # white
+highlight_color: "&H0000D7FF"  # gold (#FFD700 -> BGR 00D7FF)
+outline_color: "&H00000000"    # black
+outline: 5
+shadow: 2
+bold: true
+uppercase: true
+chunk_size: 3                  # words shown at once
+y_frac: 0.64                   # anchor y (1230/1920) — safe on TikTok/Reels/Shorts
+seam_y_frac: 0.5               # seam_band mode: between stacked videos
+margin_x: 120                  # clear of side engagement rails
+pop_scale: 128                 # word-pop peak (\fscx/\fscy %)
+emphasize_scale: 140           # bigger pop for LLM-emphasized keywords
+pop_ms: 120
+settle_ms: 220

@@ -1,0 +1,19 @@
+# Clean captions — smaller, mixed-case, subtle pop, cool blue highlight.
+# For product demos / LinkedIn-flavored clips where shouting caps feel off.
+font: Montserrat ExtraBold
+font_size: 64
+primary_color: "&H00FFFFFF"    # white
+highlight_color: "&H00FFCC66"  # soft sky blue (#66CCFF -> BGR FFCC66)
+outline_color: "&H00000000"
+outline: 3
+shadow: 1
+bold: true
+uppercase: false
+chunk_size: 2
+y_frac: 0.66
+seam_y_frac: 0.5
+margin_x: 140
+pop_scale: 112                 # restrained pop
+emphasize_scale: 120
+pop_ms: 100
+settle_ms: 200

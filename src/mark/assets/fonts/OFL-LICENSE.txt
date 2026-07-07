@@ -1,0 +1,18 @@
+Vendored fonts — all licensed under the SIL Open Font License 1.1 (OFL),
+which permits bundling, redistribution, and commercial use.
+
+- Anton-Regular.ttf
+  Copyright 2020 The Anton Project Authors (https://github.com/googlefonts/AntonFont)
+  Source: https://github.com/google/fonts/tree/main/ofl/anton
+
+- BebasNeue-Regular.ttf
+  Copyright 2010 by Dharma Type
+  Source: https://github.com/google/fonts/tree/main/ofl/bebasneue
+
+- Montserrat-ExtraBold.ttf
+  Copyright 2011 The Montserrat Project Authors (https://github.com/JulietaUla/Montserrat)
+  Source: https://github.com/JulietaUla/Montserrat (static instance, family "Montserrat", style "ExtraBold")
+
+Full license text: https://openfontlicense.org/open-font-license-official-text/
+These files are burned into rendered videos via libass (`ass=...:fontsdir=`)
+so caption rendering is deterministic across machines.

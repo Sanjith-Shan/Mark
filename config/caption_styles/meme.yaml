@@ -1,0 +1,19 @@
+# Meme captions — huge condensed impact-style type, aggressive pop, pure
+# yellow highlight. For humor/entertainment clips; pairs with emoji injection.
+font: Anton
+font_size: 96
+primary_color: "&H00FFFFFF"    # white
+highlight_color: "&H0000FFFF"  # pure yellow (#FFFF00 -> BGR 00FFFF)
+outline_color: "&H00000000"
+outline: 6
+shadow: 2
+bold: true
+uppercase: true
+chunk_size: 2
+y_frac: 0.60
+seam_y_frac: 0.5
+margin_x: 110
+pop_scale: 135
+emphasize_scale: 150
+pop_ms: 110
+settle_ms: 230

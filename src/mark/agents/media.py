@@ -42,6 +42,19 @@ def produce_media(app: App, llm: LLM, product: dict, content_id: int, plan, draf
     size = images.platform_size(plan.platform, ct)
     strategy_id = getattr(strategy, "id", None)
 
+    # Template modules (mark.templates) own their whole media pipeline —
+    # dispatch to the registered producer before any generic branch.
+    if strategy_id:
+        from .. import templates as templates_mod
+
+        templates_mod.ensure_loaded()
+        producer = templates_mod.PRODUCERS.get(strategy_id)
+        if producer:
+            result = producer(app, llm, product, content_id, plan, draft, out_dir,
+                              character=character)
+            return {"media_paths": result.get("media_paths", []),
+                    "media_urls": result.get("media_urls", [])}
+
     # Satirical UI mockups: the joke IS the interface text — render it
     # deterministically so it's pixel-perfect (models garble UI copy).
     if strategy_id == "satirical-ui-franchise" and ct in ("image", "carousel"):

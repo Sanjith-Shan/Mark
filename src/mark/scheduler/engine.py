@@ -196,6 +196,12 @@ def job_trends_fast(app: App, llm: LLM) -> None:
         _safe(humor_radar.refresh, app, llm)
         for product in _active_products(app):
             _safe(humor_radar.auto_draft, app, llm, product)
+    # Template discovery (livestream clips, paid campaigns, ...) rides it too.
+    from .. import templates as templates_mod
+
+    templates_mod.ensure_loaded()
+    for refresh_fn in templates_mod.DISCOVERY.values():
+        _safe(refresh_fn, app, llm)
     _safe(aggregator.expire_stale_content, app)
     _safe(aggregator.purge_old_trends, app)
     log.info("fast trend poll done")

@@ -59,6 +59,11 @@ mark = "mark.cli:app"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+# Vendored OFL caption fonts — burned via libass `ass=...:fontsdir=` so
+# rendering is deterministic across machines (see media/ass_captions.fonts_dir).
+mark = ["assets/fonts/*.ttf", "assets/fonts/OFL-LICENSE.txt"]
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]

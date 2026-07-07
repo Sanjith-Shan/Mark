@@ -591,7 +591,21 @@ STRATEGIES: list[Strategy] = [
 _BY_ID = {s.id: s for s in STRATEGIES}
 
 
+def _ensure_templates() -> None:
+    """Load the template-module strategies (mark.templates) into the catalog.
+
+    Lazy so importing this module stays dependency-free; safe to call anywhere
+    the catalog is read. The templates package tolerates per-module failures."""
+    try:
+        from . import templates as templates_mod
+
+        templates_mod.ensure_loaded()
+    except Exception:
+        pass
+
+
 def get(strategy_id: str) -> Optional[Strategy]:
+    _ensure_templates()
     return _BY_ID.get(strategy_id)
 
 
@@ -627,6 +641,7 @@ def catalog_for(product: Optional[dict]) -> list[Strategy]:
     brief overrides applied (products.strategy_catalog JSON, written by the
     onboarding pipeline). The base briefs encode the SudoApply research; a new
     campaign gets its own domain-specific briefs without forking the code."""
+    _ensure_templates()
     if not product:
         return STRATEGIES
     overrides = db_module.loads(product.get("strategy_catalog"), {}) or {}
