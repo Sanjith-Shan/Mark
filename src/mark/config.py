@@ -57,6 +57,12 @@ class MediaConfig(_Base):
     tts_provider: str = "openai"
     tts_model: str = "gpt-4o-mini-tts"
     tts_voice: str = "onyx"
+    # Clip-economy templates.
+    sfx_enabled: bool = True                # auto-place sound effects on every video EDL
+    avatar_model: str = "fal-ai/kling-video/ai-avatar/v2/standard"       # ambassador talking-head
+    broll_ref_model: str = "fal-ai/kling-video/o3/pro/reference-to-video"  # ambassador b-roll
+    identity_image_model: str = "fal-ai/nano-banana-pro/edit"            # identity-pack stills
+    identity_lora_trainer: str = "fal-ai/flux-lora-portrait-trainer"     # identity LoRA mint
 
 
 class SchedulingConfig(_Base):

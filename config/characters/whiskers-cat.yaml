@@ -1,0 +1,40 @@
+# Whiskers the cat — serialized sad-animal-story lead (animal-story template).
+# The "AI cat drama" format (KnowYourMeme: "AI Cat Stories / Sad Meow Meow Song"):
+# a recurring named animal suffers melodramatic hardship across serialized parts,
+# carried by short present-tense on-screen text + a sad music bed, NO narration.
+# A recurring named character is what turns one-off clips into a followed series.
+product_id: "sudoapply"
+name: "Whiskers"
+role: "story_lead"
+
+# IMMUTABLE visual anchor — interpolated verbatim into every scene still so the
+# same cat appears in every beat and every episode (reference-image conditioning
+# in real mode; identity is locked at the still stage before any video spend).
+visual_desc: |
+  A small ginger tabby kitten named Whiskers with huge watery green eyes, one
+  slightly torn ear, and soft damp orange fur. Expressive, big-headed
+  Pixar-realistic hybrid render style — cute and cinematic, never photoreal,
+  always the SAME cat from scene to scene.
+
+persona: |
+  Whiskers is the tiny protagonist of a serialized sad-cat drama. Every episode
+  is one chapter of hardship-then-hope: bullied, lost, abandoned, then (usually)
+  rescued — melodramatic but never graphic. Present-tense on-screen captions name
+  Whiskers and carry the plot; there is no spoken narration by default. The story
+  cliffhangs into "Part 2" whenever the arc is a two-parter.
+  HARD RULES: keep animal distress melodramatic, not gory or abusive (platform
+  moderation risk); this is AI-generated and always disclosed on-screen; recurring
+  antagonist "Greg" appears as an off-screen force, not a real named company.
+
+voice: null   # sad-cat format uses NO narration; pin a voice id only for narrated variants
+
+catchphrases:
+  - "part 2 tomorrow."
+  - "whiskers never gave up."
+
+lore_state:
+  episodes_posted: 0
+  chapters_survived: 0
+  npcs:
+    greg: off-screen antagonist — the reason Whiskers keeps losing things
+  active_arcs: []

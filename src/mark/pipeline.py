@@ -288,7 +288,8 @@ def generate_one(app: App, llm: LLM, product: dict, platform: str,
 
     # Media generation with the spec-mandated fallback (video fails → try image).
     media = _produce_media_with_fallback(app, llm, product, content_id, plan, draft,
-                                         character=character, strategy=strategy)
+                                         character=character, strategy=strategy,
+                                         bandit_picks=ctx["bandit_picks"])
     store.set_content_status(
         app.conn, content_id, "draft",
         content_type=plan.content_type, media_paths=media["media_paths"],
@@ -370,7 +371,8 @@ def regenerate_media(app: App, llm: LLM, content_id: int) -> dict:
     strategy = strategies_mod.get(sctx.get("strategy") or "")
 
     media = _produce_media_with_fallback(app, llm, product, content_id, plan, draft,
-                                         character=character, strategy=strategy)
+                                         character=character, strategy=strategy,
+                                         bandit_picks=sctx.get("bandit_picks"))
     store.update_content(app.conn, content_id,
                          content_type=plan.content_type,
                          media_paths=media["media_paths"], media_urls=media["media_urls"],
@@ -472,7 +474,8 @@ def adapt_content(app: App, llm: LLM, source_content_id: int,
         hashtags=draft.hashtags, hook=draft.hook, media_paths=[], media_urls=[],
         strategy_context=new_sctx, status="draft", draft=draft.model_dump())
     media = _produce_media_with_fallback(app, llm, product, content_id, plan, draft,
-                                         character=character, strategy=strategy)
+                                         character=character, strategy=strategy,
+                                         bandit_picks=sctx.get("bandit_picks"))
     store.set_content_status(app.conn, content_id, "draft",
                              content_type=plan.content_type,
                              media_paths=media["media_paths"],
@@ -491,12 +494,14 @@ def adapt_content(app: App, llm: LLM, source_content_id: int,
 
 
 def _produce_media_with_fallback(app, llm, product, content_id, plan, draft,
-                                 character: Optional[dict] = None, strategy=None) -> dict:
+                                 character: Optional[dict] = None, strategy=None,
+                                 bandit_picks: Optional[dict] = None) -> dict:
     from . import db as db_module
 
     try:
         return media_orch.produce_media(app, llm, product, content_id, plan, draft,
-                                        character=character, strategy=strategy)
+                                        character=character, strategy=strategy,
+                                        bandit_picks=bandit_picks)
     except Exception as exc:  # noqa: BLE001
         # Every degradation is recorded: a media-less image post or a video
         # that silently became a still must be visible in the queue AND to the

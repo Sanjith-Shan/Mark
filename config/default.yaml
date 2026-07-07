@@ -70,6 +70,11 @@ media:
   tts_provider: "openai"                 # "openai" or "elevenlabs"
   tts_model: "gpt-4o-mini-tts"           # ~$0.015/min, supports delivery instructions
   tts_voice: "onyx"
+  sfx_enabled: true                      # auto-place sound effects on every video EDL (SFX engine)
+  avatar_model: "fal-ai/kling-video/ai-avatar/v2/standard"        # ambassador talking-head
+  broll_ref_model: "fal-ai/kling-video/o3/pro/reference-to-video"   # ambassador lifestyle b-roll
+  identity_image_model: "fal-ai/nano-banana-pro/edit"             # identity-pack stills (character lock)
+  identity_lora_trainer: "fal-ai/flux-lora-portrait-trainer"      # identity LoRA mint
 
 scheduling:
   timezone: "America/Los_Angeles"

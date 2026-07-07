@@ -483,6 +483,69 @@ def character_sheet(ctx: typer.Context, character_id: int):
     console.print(f"[green]Sheet saved:[/] {path}")
 
 
+@character_app.command("mint-identity")
+def character_mint_identity(ctx: typer.Context, character_id: int):
+    """Mint the immutable identity pack (canonical face, refs, locked voice,
+    ArcFace embedding) for an AI ambassador. Idempotent — never regenerates an
+    existing pack. Run once before the ambassador's first video."""
+    from . import characters as characters_mod
+    from .llm import LLM
+    from .templates import ambassador
+
+    a = _app(ctx)
+    c = characters_mod.get(a, character_id)
+    if not c:
+        console.print(f"[red]Character {character_id} not found.[/]")
+        raise typer.Exit(1)
+    with console.status(f"[bold]Minting {c['name']}'s identity pack…[/]"):
+        pack = ambassador.ensure_identity(a, LLM(a), c)
+    console.print(f"[green]Identity pack ready for {c['name']}.[/] "
+                  f"canonical={pack.get('canonical_face')}")
+
+
+# --------------------------------------------------------------------------- #
+# Sound-effects engine
+# --------------------------------------------------------------------------- #
+sfx_app = typer.Typer(help="Sound-effects library for video templates + the editor.")
+app.add_typer(sfx_app, name="sfx")
+
+
+@sfx_app.command("sync")
+def sfx_sync(ctx: typer.Context,
+             only: Optional[str] = typer.Option(None, "--only",
+                 help="Comma-separated slugs to (re)fetch; default all.")):
+    """Download/curate the SFX library into data/sfx/ (Freesound CC0 + Kenney,
+    loudness-normalized, transient-analyzed). Synthesizes offline placeholders
+    when FREESOUND_API_KEY is absent so the engine always works."""
+    from .sourcing import sfx_bank
+
+    a = _app(ctx)
+    slugs = [s.strip() for s in only.split(",")] if only else None
+    with console.status("[bold]Syncing SFX library…[/]"):
+        manifest = sfx_bank.sync_library(a, only=slugs)
+    console.print(f"[green]SFX library ready:[/] {len(manifest)} effect(s) in data/sfx/.")
+
+
+@sfx_app.command("list")
+def sfx_list(ctx: typer.Context):
+    """List the curated SFX library (slug, family, source, license)."""
+    from .sourcing import sfx_bank
+
+    a = _app(ctx)
+    manifest = sfx_bank.load_manifest(a)
+    if not manifest:
+        console.print("[yellow]No SFX synced yet.[/] Run [bold]mark sfx sync[/].")
+        raise typer.Exit()
+    table = Table(title="SFX library")
+    for col in ("slug", "family", "source", "license", "dur", "onset_ms"):
+        table.add_column(col)
+    for slug, e in sorted(manifest.items()):
+        table.add_row(slug, str(e.get("family", "")), str(e.get("source", "")),
+                      str(e.get("license", "")), f"{e.get('duration', 0):.2f}",
+                      str(e.get("onset_ms", "")))
+    console.print(table)
+
+
 @app.command()
 def analytics(
     ctx: typer.Context,

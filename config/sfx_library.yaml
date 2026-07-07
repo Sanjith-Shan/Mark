@@ -1,0 +1,333 @@
+# config/sfx_library.yaml
+# Canonical SFX library for the auto-placement engine (Contract 7).
+# slug -> effect. The sourcer (`mark sfx sync`, sourcing/sfx_bank.py) fills each
+# slug from a monetization-safe source and records it in data/sfx/manifest.json.
+#
+# align: "onset" = attack transient lands on the target frame; "peak" = loudest
+#        point lands on the frame (whooshes/risers swell INTO the cut).
+# license gate: only CC0 / Mixkit-Free / Pixabay-Content assets may back a slug.
+#               Zapsplat / Uppbeat / BBC-RemArc are hard-rejected in code, and the
+#               query keywords deliberately fetch GENERIC equivalents of meme
+#               originals (never the copyrighted Vine Boom or branded MLG airhorn).
+#
+# cap        = per-clip max placements for this slug (None = only the global caps apply).
+# min_gap_s  = overrides the global 0.6s min-gap between transients where noted
+#              (0.0 = caption-synced, exempt from the gap rule).
+
+version: 1
+
+defaults:
+  sample_rate: 48000
+  loudnorm: "I=-16:TP=-1.5:LRA=11"   # ffmpeg loudnorm applied to every ingested clip
+  global_min_gap_s: 0.6
+  density_per_30s: 8                  # target; hard ceiling 10 (enforced by the engine)
+
+families:                            # mix + arbitration policy per family
+  transition:    { base_gain_db: -12, align: peak,  duck_music_db: -4 }
+  impact:        { base_gain_db: -4,  align: onset, duck_music_db: -8 }
+  riser:         { base_gain_db: -6,  align: peak,  duck_music_db: -3 }  # automates up to peak
+  comedy_meme:   { base_gain_db: -5,  align: onset, duck_music_db: -8 }
+  ui:            { base_gain_db: -15, align: onset, duck_music_db: -2 }
+  suspense:      { base_gain_db: -14, align: onset, duck_music_db: -3 }
+  aesthetic:     { base_gain_db: -12, align: onset, duck_music_db: -3 }
+  money:         { base_gain_db: -8,  align: onset, duck_music_db: -6 }
+  reward:        { base_gain_db: -8,  align: onset, duck_music_db: -6 }
+  hook:          { base_gain_db: -7,  align: onset, duck_music_db: -6 }
+  social:        { base_gain_db: -10, align: onset, duck_music_db: -4 }
+  atmosphere:    { base_gain_db: -20, align: none,  duck_music_db: 0  }  # bed, not a transient
+
+effects:
+
+  # ---- TRANSITIONS / WHOOSHES (mask cuts; align PEAK to the cut frame) ----
+  - slug: whoosh_short
+    family: transition
+    purpose: Default cut mask; sells a quick hard/motion cut.
+    placement: On every qualifying cut (motion high OR text/logo reveal). Peak on the cut frame. Skip static cuts with no motion and no title.
+    query: [whoosh, swoosh, fast whoosh, air whoosh]
+
+  - slug: whoosh_long_cinematic
+    family: transition
+    purpose: Bigger, slower sweep for a scene/section change or a dramatic B-roll cut.
+    placement: On major section boundaries (not every cut). Peak on the cut; often precedes an impact.
+    query: [cinematic whoosh, long whoosh, transition whoosh]
+
+  - slug: whoosh_reverse
+    family: transition
+    purpose: Suck-back anticipation into a cut/reveal; soft alternative to a riser on short builds.
+    placement: Swell ENDS on the reveal/transition cut (starts ~0.3-0.8s before). Preferred on slow dissolves where a hard impact would feel wrong.
+    query: [reverse whoosh, reverse swoosh, suck back, backwards whoosh]
+
+  - slug: swish_fast
+    family: transition
+    purpose: Snappy directional swipe for whip-pans and swipe transitions.
+    placement: On whip-pan / directional cuts. Pan the swish in the swipe direction. Peak on the cut.
+    query: [swish, whip, whip pan, quick swoosh]
+
+  - slug: page_turn_swipe
+    family: transition
+    purpose: Carousel/listicle slide-advance feel.
+    placement: On slide-to-slide transitions in listicle/carousel-style edits.
+    query: [page turn, swipe, slide whoosh]
+
+  - slug: glitch_transition
+    family: transition
+    purpose: Edgy digital/RGB-split transition; tech/gaming aesthetic.
+    placement: On glitch-style transitions and distortion/RGB-split moments. Onset on the frame the image tears.
+    query: [glitch, digital glitch, stutter, datamosh, distortion]
+
+  - slug: camera_shutter
+    family: transition
+    purpose: Freeze-frame / "screenshot this" / photo-snap beat.
+    placement: On the exact frame motion freezes; often paired with a white flash + brief zoom.
+    query: [camera shutter, shutter, photo snap, snapshot]
+
+  # ---- IMPACTS (land ON the cut / title-slam / reveal; use sparingly) ----
+  - slug: impact_hit_mid
+    family: impact
+    purpose: Mid-bright "button" on a hard cut or title land; the payoff transient after a whoosh.
+    placement: On hard cuts, title/text lands, and the PEAK frame of a riser (riser->impact combo).
+    cap: 3
+    query: [impact, hit, slam, cinematic hit]
+
+  - slug: boom_cinematic
+    family: impact
+    purpose: Sub-bass braam; adds weight and a "drop" feel to a product/result reveal.
+    placement: On the single biggest reveal frame. HARD CAP 2 booms/clip total (shared with boom_deep_meme). Never within 300ms of another low-end hit.
+    cap: 2
+    min_gap_s: 0.3
+    query: [braam, sub boom, deep boom, cinematic boom, trailer hit]
+
+  - slug: boom_deep_meme            # generic Vine-Boom equivalent (licensing-safe)
+    family: comedy_meme
+    purpose: Deep reverberant bass punchline stamp; the comedic/dramatic exclamation point.
+    placement: On the exact frame of a detected punchline word or a sudden zoom-in. A hair AFTER the joke lands so the boom IS the payoff. Shares the 2-boom/clip cap with boom_cinematic.
+    cap: 2
+    min_gap_s: 0.3
+    query: [deep reverb boom, meme boom, bass thud reverb]   # NOT the copyrighted Vine original
+
+  - slug: bass_drop
+    family: impact
+    purpose: Locks a visual energy peak to the music's drop; launches a montage / beat-switch.
+    placement: On the onset-detected beat_drop; quantize the biggest visual cut to land here.
+    cap: 1
+    query: [bass drop, sub drop, deep drop]
+
+  - slug: screen_shake_rumble
+    family: impact
+    purpose: Amplifies an impact/boom for maximum emphasis on the strongest reveal.
+    placement: Layered UNDER an impact/boom on the single strongest reveal; pair with a punch-in zoom. Rare.
+    cap: 1
+    query: [rumble, earthquake rumble, low rumble impact]
+
+  # ---- RISERS (start N bars before reveal, PEAK on the reveal frame) ----
+  - slug: riser_2bar
+    family: riser
+    purpose: Short tension build before a quick reveal/punchline.
+    placement: START = peak - min(2*bar_len, 1.5s); PEAK on the reveal cut; crossfade into an impact at the peak.
+    cap: 2
+    query: [short riser, riser, uplifter, tension rise]
+
+  - slug: riser_4bar
+    family: riser
+    purpose: Standard build before a before/after, price, or transformation reveal.
+    placement: START = peak - min(4*bar_len, 3s); PEAK on the reveal; pair with fade-to-white or zoom.
+    cap: 1
+    query: [riser, build up, sweep up, tension riser]
+
+  - slug: riser_8bar
+    family: riser
+    purpose: Long dramatic build for a big single climax.
+    placement: START up to 3s (engine clamps) before the climax reveal; PEAK on it. One per clip max.
+    cap: 1
+    query: [long riser, epic riser, uplifter long]
+
+  - slug: drumroll
+    family: riser
+    purpose: Suspense before a ranked/announcement reveal.
+    placement: Runs into a ranked reveal or "and the winner is" beat; ends abruptly on the reveal.
+    cap: 1
+    query: [drumroll, drum roll, snare roll]
+
+  # ---- COMEDY / MEME STINGERS ----
+  - slug: record_scratch
+    family: comedy_meme
+    purpose: Jarring full-stop; abrupt tone shift / "wait, back up" narrative pivot.
+    placement: On a hard freeze-frame or the moment narration pivots ("yep, that's me..."). Duck music to near-silence right after.
+    cap: 1
+    query: [record scratch, vinyl scratch, dj scratch, needle stop]
+
+  - slug: airhorn
+    family: comedy_meme
+    purpose: Loud hype/surprise emphasis; ironic or genuine excitement spike.
+    placement: On a big reveal/flex/hype drop; lands on the music accent beat. Can double/triple on a montage beat.
+    cap: 2
+    query: [air horn, horn hit, hype horn]      # generic, not the branded MLG clip
+
+  - slug: cash_register
+    family: money
+    purpose: Money / sale / profit / ironic "$$$ success" payoff.
+    placement: On the frame a price/earnings/"sold" number appears, or an ironic stamp after a money punchline.
+    cap: 2
+    query: [cash register, cha ching, kaching, coin, sale]
+
+  - slug: womp_womp
+    family: comedy_meme
+    purpose: Fail / letdown / anticlimax; deflates a moment for comedy.
+    placement: On the fail beat / the disappointing reveal.
+    cap: 1
+    query: [sad trombone, womp womp, fail, wah wah]
+
+  - slug: cricket_awkward
+    family: comedy_meme
+    purpose: Dead-air awkwardness after a flat joke or unanswered question.
+    placement: In the beat of silence right after a joke that "fails"; music ducks to ~zero underneath.
+    cap: 1
+    query: [crickets, awkward silence crickets, night crickets]
+
+  - slug: cartoon_boing
+    family: comedy_meme
+    purpose: Light, family-friendly punctuation for a silly movement/reveal (softer than a boom).
+    placement: On a bouncy zoom/scale animation, a silly object appearing, or a lighthearted punchline.
+    cap: 2
+    query: [boing, cartoon boing, spring boing]
+
+  - slug: cartoon_pop
+    family: comedy_meme
+    purpose: Playful "pop into existence" for a fun sticker/emoji reveal.
+    placement: On a sticker/emoji/prop popping onto screen in a playful edit.
+    query: [cartoon pop, cork pop, bubble pop cartoon]
+
+  # ---- UI / NOTIFICATION (caption-synced; low gain, per-word exempt from gap cap) ----
+  - slug: pop_text
+    family: ui
+    purpose: Tactile "appear" on each caption word / list item; the on-keyword accent.
+    placement: SYNCED to each emphasized caption word / list-bullet keyframe. Transient in the ~60-120ms gap BEFORE the word onset so it never masks the consonant. Exempt from global min_gap.
+    min_gap_s: 0.0
+    query: [pop, text pop, ui pop, blip]
+
+  - slug: bubble_pop
+    family: ui
+    purpose: Rounder alternative pop for softer/aesthetic caption styles.
+    placement: Same as pop_text for softer edits.
+    min_gap_s: 0.0
+    query: [bubble pop, soft pop, water pop]
+
+  - slug: click_tap
+    family: ui
+    purpose: UI interaction feedback for screen-recording taps / callouts.
+    placement: On UI screen-record taps and menu/callout appears.
+    query: [click, tap, ui click, button click, mouse click]
+
+  - slug: ding_notification
+    family: ui
+    purpose: App-alert attention cue; subtle hook grab.
+    placement: On a notification/ping overlay, or a light attention-grab in the first 1-3s (hook).
+    query: [notification, ding, ping, chime, alert]
+
+  - slug: ding_correct
+    family: reward
+    purpose: 'Correct! / checkmark / positive confirmation.'
+    placement: On a checkmark/tick appearing or a "correct answer" reveal. One ding per positive point.
+    query: [correct ding, ding correct, right answer, tick]
+
+  - slug: typewriter_clatter
+    family: ui
+    purpose: Reinforces letter-by-letter text animation.
+    placement: Runs UNDER a typewriter text animation, each keystroke aligned to each letter; stops when the line finishes.
+    query: [typewriter, keyboard typing, typing keys]
+
+  - slug: error_buzzer
+    family: comedy_meme
+    purpose: Mistake / myth-bust / "don't do this" marker.
+    placement: On the wrong-way example just before showing the fix.
+    cap: 2
+    query: [error buzzer, wrong buzzer, incorrect, game show buzzer]
+
+  - slug: success_chime
+    family: reward
+    purpose: Win / completion / level-up reward.
+    placement: On the payoff/result reveal or an end-card success moment.
+    cap: 2
+    query: [success, level up, achievement, win chime, complete]
+
+  # ---- SUSPENSE (beds + stinger; the drone->heartbeat->riser->STINGER stack) ----
+  - slug: heartbeat
+    family: suspense
+    purpose: Urgency / stakes under a tense hold.
+    placement: BED under the tension section leading to a reveal; tempo may accelerate then cut out ON the reveal frame.
+    query: [heartbeat, heart beat, pulse]
+
+  - slug: clock_tick
+    family: suspense
+    purpose: Deadline / countdown / "time's running out".
+    placement: BED under a countdown / "wait for it" / decision moment; ticks on-beat, ends abruptly on the answer.
+    query: [clock tick, ticking clock, countdown tick, timer]
+
+  - slug: drone_tension
+    family: suspense
+    purpose: Low unease bed that opens a suspense build.
+    placement: BED under the setup of a suspense segment (drone -> heartbeat -> riser -> stinger).
+    query: [tension drone, dark drone, suspense drone, low hum]
+
+  - slug: stinger_sharp
+    family: suspense
+    purpose: Sharp sting that caps a tension build / punctuates a jump.
+    placement: On the reveal/hard-cut frame at the END of a suspense build. High-pitch sting = sudden panic; low = dread.
+    cap: 2
+    query: [stinger, suspense sting, horror sting, sharp hit]
+
+  # ---- AESTHETIC / REVEAL ----
+  - slug: sparkle_shimmer
+    family: aesthetic
+    purpose: Magic / premium / glow-up feel; softens transitions.
+    placement: On a glow-up / transformation / product-glam reveal; shimmer swells as the pretty result appears. Also layered between aesthetic sections for flow.
+    query: [sparkle, shimmer, glitter, magic sparkle]
+
+  - slug: magic_twinkle
+    family: aesthetic
+    purpose: Small "wow / shine" highlight over text or a logo.
+    placement: On a shine sweep over text/logo or a small premium highlight.
+    query: [twinkle, magic chime, fairy shimmer, sparkle chime]
+
+  # ---- HOOK / BRANDING ----
+  - slug: hook_sting
+    family: hook
+    purpose: Sonic pattern-break in the first 0-3s to stop the scroll and set mood before/under the first word.
+    placement: Exactly ONE per video, transient on (or just under) the first hook word onset inside the hook window.
+    cap: 1
+    query: [intro sting, sting, brand sting, ident hit]
+
+  - slug: snare_roll_into_silence
+    family: hook
+    purpose: 'Surprise cold-open — snare roll that drops to silence for a hard-open hook.'
+    placement: Alternative hook opener; roll resolves to silence on the first spoken word. Mutually exclusive with hook_sting.
+    cap: 1
+    query: [snare roll, snare buildup, drum fill]
+
+  - slug: logo_sting
+    family: hook
+    purpose: Brand mnemonic on the outro/logo reveal.
+    placement: On the end-card / logo reveal (last 1-2s), reinforcing the CTA.
+    cap: 1
+    query: [logo sting, brand ident, outro sting, logo reveal]
+
+  # ---- SOCIAL / ATMOSPHERE ----
+  - slug: crowd_ohhh
+    family: social
+    purpose: Amplifies a burn/comeback/shocking reveal with "the crowd reacts" energy.
+    placement: On a savage line / comeback / shock beat.
+    cap: 2
+    query: [crowd ohh, crowd reaction, ooooh, audience gasp]
+
+  - slug: applause_cheer
+    family: social
+    purpose: Crowd approval / celebration on a win.
+    placement: On a success/win moment or CTA celebration.
+    cap: 2
+    query: [applause, cheer, crowd cheer, clapping, celebration]
+
+  - slug: ambience_bed
+    family: atmosphere
+    purpose: Room-tone / texture bed so cuts read cleaner without being a noticeable accent.
+    placement: UNDER a scene/segment (not a transient); very low, ducks under dialogue.
+    query: [room tone, ambience, atmosphere bed, whoosh bed]

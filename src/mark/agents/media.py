@@ -8,6 +8,7 @@ stack (moviepy/ffmpeg/fal).
 
 from __future__ import annotations
 
+import contextvars
 import time
 from datetime import datetime
 from pathlib import Path
@@ -18,6 +19,11 @@ from ..app import App
 from ..llm import LLM
 from ..media import images
 
+# The bandit's sfx_style pick for the current generation, made available to the
+# per-template SFX step (apply_sfx_to_edl) without threading it through every
+# producer signature. Set by produce_media around the producer call.
+_sfx_style_var: contextvars.ContextVar = contextvars.ContextVar("sfx_style", default=None)
+
 
 def media_dir_for(app: App, product_id: str, content_id: int) -> Path:
     day = datetime.now().strftime("%Y-%m-%d")
@@ -27,7 +33,7 @@ def media_dir_for(app: App, product_id: str, content_id: int) -> Path:
 
 
 def produce_media(app: App, llm: LLM, product: dict, content_id: int, plan, draft,
-                  character: dict = None, strategy=None) -> dict:
+                  character: dict = None, strategy=None, bandit_picks: dict = None) -> dict:
     """Generate all media for a piece of content. Raises on hard failure so the
     caller can apply the video→image fallback. When ``character`` is set, image
     and video generation are conditioned on its reference sheet so the same
@@ -50,8 +56,13 @@ def produce_media(app: App, llm: LLM, product: dict, content_id: int, plan, draf
         templates_mod.ensure_loaded()
         producer = templates_mod.PRODUCERS.get(strategy_id)
         if producer:
-            result = producer(app, llm, product, content_id, plan, draft, out_dir,
-                              character=character)
+            # Expose the bandit's SFX-style pick to the template's apply_sfx step.
+            token = _sfx_style_var.set((bandit_picks or {}).get("sfx_style"))
+            try:
+                result = producer(app, llm, product, content_id, plan, draft, out_dir,
+                                  character=character)
+            finally:
+                _sfx_style_var.reset(token)
             return {"media_paths": result.get("media_paths", []),
                     "media_urls": result.get("media_urls", [])}
 
@@ -129,6 +140,38 @@ def produce_media(app: App, llm: LLM, product: dict, content_id: int, plan, draf
     images.generate_image(app, llm, draft.image_prompt or plan.topic, path,
                           size=size, content_id=content_id, product_id=product["id"])
     return {"media_paths": [str(path)], "media_urls": []}
+
+
+def apply_sfx_to_edl(app: App, llm: LLM, edl, *, plan=None, product=None,
+                     context: dict | None = None):
+    """Auto-place sound effects on a video EDL just before its final render.
+
+    Shared build step: every video template calls this on its EDL after captions
+    are populated and before ``render_edl``. Gated by ``media.sfx_enabled``;
+    idempotent (the engine no-ops if the EDL already carries sfx tracks); and
+    strictly best-effort — a failure here never blocks a render (a video without
+    SFX is fine; a crashed pipeline is not)."""
+    if not getattr(app.settings.media, "sfx_enabled", True):
+        return edl
+    try:
+        from ..media import sfx as sfx_mod
+    except Exception:
+        return edl
+    ctx = dict(context or {})
+    style = _sfx_style_var.get()
+    if style:
+        ctx.setdefault("sfx_style", style)
+    if plan is not None:
+        ctx.setdefault("platform", getattr(plan, "platform", None))
+        ctx.setdefault("tone", getattr(plan, "tone", None) or getattr(plan, "angle", None))
+    if product is not None:
+        ctx.setdefault("brand_voice", product.get("brand_voice"))
+    try:
+        return sfx_mod.apply_sfx(app, llm, edl, context=ctx)
+    except Exception as exc:  # noqa: BLE001 — SFX is a nicety, never a blocker
+        record_degradation(app, f"sfx placement skipped: {exc}",
+                           product_id=(product or {}).get("id"))
+        return edl
 
 
 def record_degradation(app: App, reason: str, content_id: int | None = None,

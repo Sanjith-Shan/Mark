@@ -10,6 +10,7 @@ import Playbook from "./pages/Playbook";
 import Learn from "./pages/Learn";
 import Autopilot from "./pages/Autopilot";
 import Settings from "./pages/Settings";
+import Editor from "./pages/Editor";
 import { Pill } from "./components/ui";
 import { api } from "./api";
 
@@ -50,7 +51,14 @@ const TITLES: Record<string, string> = {
   "/analytics": "Analytics", "/trends": "Trends", "/playbook": "Playbook",
   "/learn": "What's working",
   "/autopilot": "Autopilot", "/settings": "Settings",
+  "/editor": "Clip Editor",
 };
+
+function titleFor(pathname: string): string {
+  if (TITLES[pathname]) return TITLES[pathname];
+  if (pathname.startsWith("/editor")) return TITLES["/editor"];
+  return "Mark";
+}
 
 export default function App() {
   return (
@@ -96,7 +104,7 @@ function Shell() {
       </aside>
       <div className="main">
         <header className="topbar">
-          <h1>{TITLES[loc.pathname] ?? "Mark"}</h1>
+          <h1>{titleFor(loc.pathname)}</h1>
           <div className="topbar-spacer" />
           <span data-tour="autopilot-toggle"><AutopilotIndicator /></span>
           <span data-tour="providers"><ProviderDots /></span>
@@ -113,6 +121,7 @@ function Shell() {
               <Route path="/learn" element={<Learn />} />
               <Route path="/autopilot" element={<Autopilot />} />
               <Route path="/settings" element={<Settings />} />
+              <Route path="/editor/:contentId" element={<Editor />} />
             </Routes>
           </div>
         </div>

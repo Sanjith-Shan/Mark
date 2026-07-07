@@ -16,7 +16,7 @@ from typing import Any, Optional
 
 import yaml
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field, ValidationError
 
 from .. import db as db_module
@@ -699,6 +699,39 @@ def build_router(rt: Runtime) -> APIRouter:
             raise HTTPException(400, str(exc))
         return content_out(row)
 
+    # ------------------------------------------------------------------ #
+    # Paid clipping-campaign discovery (ContentRewards/Whop). DISCOVERY +
+    # TRACKING ONLY — joining/posting/submitting are always human actions.
+    # ------------------------------------------------------------------ #
+    @r.get("/clip-campaigns")
+    def clip_campaigns(limit: int = 15, include_blocked: bool = False) -> list[dict]:
+        from ..templates import campaigns
+
+        app = rt.app()
+        return campaigns.digest(app, limit=limit, include_blocked=include_blocked)
+
+    @r.post("/clip-campaigns/refresh")
+    def refresh_clip_campaigns() -> dict:
+        def _run(app, llm, job, report):
+            from ..templates import campaigns
+
+            report(0.2, "Polling clipping-campaign platforms…")
+            campaigns.refresh(app, llm)
+            rows = campaigns.digest(app, limit=200, include_blocked=True)
+            report(1.0, f"Tracking {len(rows)} campaigns")
+            return {"count": len(rows)}
+
+        job = rt.jobs.submit("clip_campaigns", "Refresh clip campaigns", _run)
+        return {"job_id": job.id}
+
+    @r.post("/clip-campaigns/{campaign_id}/joined")
+    def mark_clip_campaign_joined(campaign_id: int, joined: bool = True) -> dict:
+        """Record that the HUMAN joined this campaign (never automated)."""
+        app = rt.app()
+        db_module.execute(app.conn, "UPDATE clip_campaigns SET joined = ? WHERE id = ?",
+                          (1 if joined else 0, campaign_id))
+        return {"id": campaign_id, "joined": joined}
+
     class ReactIn(BaseModel):
         campaign_id: Optional[str] = None
         topic: Optional[str] = None            # default: hottest qualifying trend
@@ -1140,6 +1173,246 @@ def build_router(rt: Runtime) -> APIRouter:
         from ..posting.upload_post import UploadPostClient
 
         return UploadPostClient(rt.app()).profile_info()
+
+    # ------------------------------------------------------------------ #
+    # Clip / caption editor (EDL) — Contract 6 of the templates build
+    # ------------------------------------------------------------------ #
+    # Fonts are vendored OFL-only; family names must match what the renderer's
+    # libass/Pillow burn resolves so the browser preview looks like the export.
+    _FONTS_DIR = Path(__file__).resolve().parents[1] / "assets" / "fonts"
+    _FONT_FAMILIES = {
+        "Montserrat-ExtraBold.ttf": "Montserrat ExtraBold",
+        "Anton-Regular.ttf": "Anton",
+        "BebasNeue-Regular.ttf": "Bebas Neue",
+    }
+
+    def media_url_for(app, path: str) -> Optional[str]:
+        """Like media_url() but bound to a job thread's own App (no rt.app())."""
+        try:
+            rel = Path(path).resolve().relative_to(app.paths.media_dir.resolve())
+            return f"/media/{rel.as_posix()}"
+        except Exception:
+            return None
+
+    def edit_json_path(row: dict) -> Optional[Path]:
+        """Locate this content's edit.json: content.edl_path, else next to media."""
+        if row.get("edl_path"):
+            return Path(row["edl_path"])
+        for m in db_module.loads(row.get("media_paths"), []) or []:
+            d = Path(m).parent
+            if d.is_dir():
+                return d / "edit.json"
+        return None
+
+    def caption_styles() -> list[dict]:
+        """Every caption style preset (id + fields) for the editor's style picker
+        and preview. Loaded fresh so config edits show up without a restart."""
+        out = []
+        sdir = rt.app().paths.config_dir / "caption_styles"
+        if sdir.is_dir():
+            for f in sorted(sdir.glob("*.yaml")):
+                try:
+                    data = yaml.safe_load(f.read_text()) or {}
+                except Exception:
+                    data = {}
+                data["id"] = f.stem
+                out.append(data)
+        return out
+
+    def font_list() -> list[dict]:
+        out = []
+        if _FONTS_DIR.is_dir():
+            for fn, family in _FONT_FAMILIES.items():
+                if (_FONTS_DIR / fn).is_file():
+                    out.append({"family": family, "url": f"/api/fonts/{fn}", "file": fn})
+        return out
+
+    @r.get("/edit/{content_id}")
+    def edit_get(content_id: int) -> dict:
+        from ..media import edl as edl_mod
+
+        app = rt.app()
+        row = get_content_or_404(content_id)
+        ejp = edit_json_path(row)
+        if not ejp or not ejp.is_file():
+            raise HTTPException(
+                404, f"content {content_id} has no editable EDL (edit.json) — "
+                     "only auto-assembled clip videos are editable")
+        try:
+            edl_obj = edl_mod.load(ejp)
+        except Exception as exc:
+            raise HTTPException(400, f"edit.json is invalid: {exc}")
+        edl_dir = ejp.parent
+        # Preview video: a fast proxy first, else the captionless master, else the
+        # content's final rendered video (captions burned — still previewable).
+        media_urls: dict[str, Optional[str]] = {"proxy": None, "master": None, "video": None}
+        for key, name in (("proxy", "proxy.mp4"), ("master", "master.mp4")):
+            f = edl_dir / name
+            if f.is_file():
+                media_urls[key] = media_url(str(f))
+        for m in db_module.loads(row.get("media_paths"), []) or []:
+            if str(m).endswith((".mp4", ".mov", ".webm")):
+                media_urls["video"] = media_url(m)
+                break
+        # Voiceover audio drives the waveform (caption-timing lane).
+        audio_url = None
+        for tr in edl_obj.audio:
+            if tr.kind == "voiceover" and tr.src:
+                ap = Path(tr.src)
+                ap = ap if ap.is_absolute() else (edl_dir / ap)
+                if ap.is_file():
+                    audio_url = media_url(str(ap))
+                    break
+        return {
+            "content_id": content_id,
+            "platform": row["platform"],
+            "content_type": row["content_type"],
+            "status": row["status"],
+            "edl": edl_obj.model_dump(by_alias=True),
+            "media_urls": media_urls,
+            "audio_url": audio_url,
+            "styles": caption_styles(),
+            "fonts": font_list(),
+            "sfx_available": (app.paths.config_dir / "sfx_library.yaml").is_file(),
+        }
+
+    @r.post("/edit/{content_id}")
+    def edit_save(content_id: int, body: dict) -> dict:
+        from ..media import edl as edl_mod
+
+        app = rt.app()
+        row = get_content_or_404(content_id)
+        if row["status"] == "posted":
+            raise HTTPException(400, "content is already posted — its EDL is locked")
+        try:
+            edl_obj = edl_mod.EDL.model_validate(body)
+        except ValidationError as exc:
+            raise HTTPException(400, f"invalid EDL: {exc}")
+        except Exception as exc:  # pydantic raises ValueError from validators
+            raise HTTPException(400, f"invalid EDL: {exc}")
+        ejp = edit_json_path(row)
+        if not ejp:
+            raise HTTPException(400, "content has no media directory to store the EDL")
+        edl_mod.save(edl_obj, ejp)
+        if row.get("edl_path") != str(ejp):
+            store.update_content(app.conn, content_id, edl_path=str(ejp))
+        db_module.log_activity(app.conn, "edit", f"Edited EDL for #{content_id}",
+                               product_id=row["product_id"], content_id=content_id)
+        return {"ok": True, "edl_path": str(ejp)}
+
+    @r.post("/edit/{content_id}/proxy")
+    def edit_proxy(content_id: int) -> dict:
+        row = get_content_or_404(content_id)
+
+        def _run(app, llm, job, report):
+            from ..media import edl as edl_mod
+            from ..media import render as render_mod
+
+            report(0.1, "Loading EDL…")
+            r2 = store.get_content(app.conn, content_id)
+            ejp = edit_json_path(r2)
+            if not ejp or not ejp.is_file():
+                raise RuntimeError("no edit.json for this content")
+            edl_obj = edl_mod.load(ejp)
+            out = ejp.parent / "proxy.mp4"
+            report(0.3, "Rendering 480p preview…")
+            render_mod.render_edl(app, edl_obj, ejp.parent, out, proxy=True)
+            report(1.0, "Preview ready")
+            return {"proxy_url": media_url_for(app, str(out)), "content_id": content_id}
+
+        job = rt.jobs.submit("edit", f"Re-cut proxy #{content_id}", _run,
+                             product_id=row["product_id"])
+        return {"job_id": job.id}
+
+    @r.post("/edit/{content_id}/render")
+    def edit_render(content_id: int) -> dict:
+        row = get_content_or_404(content_id)
+        if row["status"] == "posted":
+            raise HTTPException(400, "content is already posted — cannot re-render")
+
+        def _run(app, llm, job, report):
+            from ..media import edl as edl_mod
+            from ..media import render as render_mod
+
+            report(0.1, "Loading EDL…")
+            r2 = store.get_content(app.conn, content_id)
+            ejp = edit_json_path(r2)
+            if not ejp or not ejp.is_file():
+                raise RuntimeError("no edit.json for this content")
+            edl_obj = edl_mod.load(ejp)
+            out = ejp.parent / f"{content_id}_{r2['platform']}_video.mp4"
+            report(0.3, "Rendering final 1080×1920…")
+            render_mod.render_edl(app, edl_obj, ejp.parent, out, proxy=False)
+            # Swap the content's media to the freshly rendered file; it flows back
+            # into the normal approve/post path from here.
+            store.update_content(app.conn, content_id, media_paths=[str(out)])
+            report(1.0, "Final render complete")
+            rt.bus.publish("content", {"id": content_id, "status": r2["status"]})
+            return {"video_url": media_url_for(app, str(out)), "content_id": content_id}
+
+        job = rt.jobs.submit("render", f"Render final #{content_id}", _run,
+                             product_id=row["product_id"])
+        return {"job_id": job.id}
+
+    @r.get("/sfx")
+    def sfx_library() -> list[dict]:
+        """The curated SFX library (Contract 7). Degrades to [] when the
+        parallel SFX engine hasn't shipped its manifest yet — the editor then
+        just shows no library, but SFX cues already in an EDL stay editable."""
+        app = rt.app()
+        manifest = app.paths.config_dir / "sfx_library.yaml"
+        if not manifest.is_file():
+            return []
+        try:
+            data = yaml.safe_load(manifest.read_text()) or {}
+        except Exception:
+            return []
+        # Schema is owned by the parallel SFX engine (Contract 7). Accept its
+        # actual shape (top-level `effects`, per-item `family`) as well as a
+        # plain `sfx` list — and tolerate either without crashing.
+        items = None
+        default_gain = 0
+        if isinstance(data, list):
+            items = data
+        elif isinstance(data, dict):
+            default_gain = (data.get("defaults") or {}).get("gain_db", 0)
+            for key in ("effects", "sfx", "library", "items"):
+                if isinstance(data.get(key), list):
+                    items = data[key]
+                    break
+        if not isinstance(items, list):
+            return []
+        out = []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            slug = str(it.get("slug") or "").strip()
+            if not slug:
+                continue
+            cached = app.paths.data_dir / "assets" / "sfx" / f"{slug}.mp3"
+            out.append({
+                "slug": slug,
+                "name": it.get("name") or slug.replace("_", " "),
+                "category": it.get("category") or it.get("family"),
+                "purpose": it.get("purpose"),
+                "duration": it.get("duration"),
+                "gain_db": it.get("gain_db", default_gain),
+                "src": str(cached) if cached.is_file() else None,
+                "url": media_url_for(app, str(cached)) if cached.is_file() else None,
+            })
+        return out
+
+    @r.get("/fonts/{name}")
+    def font_file(name: str) -> FileResponse:
+        """Serve a vendored caption font so the browser preview @font-face uses
+        the exact same file the burn does."""
+        if name not in _FONT_FAMILIES or "/" in name or "\\" in name:
+            raise HTTPException(404, "unknown font")
+        path = _FONTS_DIR / name
+        if not path.is_file():
+            raise HTTPException(404, "font file missing")
+        return FileResponse(str(path), media_type="font/ttf",
+                            headers={"Cache-Control": "public, max-age=86400"})
 
     return r
 

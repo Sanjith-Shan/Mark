@@ -53,6 +53,8 @@ def candidate_values(app: App, platform: str,
         "humor_mechanism": HUMOR_MECHANISMS,
         "humor_persona": HUMOR_PERSONAS,
         "emotional_target": EMOTIONAL_TARGETS,
+        # SFX density/character for video templates (the SFX engine's style gate).
+        "sfx_style": ["heavy_meme", "clean_cinematic", "minimal"],
     }
     strategy_ids = strategies_mod.candidate_ids(app, platform, product=product)
     if product is not None:

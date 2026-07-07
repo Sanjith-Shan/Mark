@@ -1,5 +1,6 @@
 // Content Studio — the review/edit/approve queue. The most important page of Mark.
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../api";
 import { useGlobal } from "../store";
 import { ALL_PLATFORMS, Content, MediaItem, PLATFORM_COLORS, PLATFORM_LABELS, PostRecord } from "../types";
@@ -438,6 +439,12 @@ function Drawer(props: { id: number; initialReject: boolean; onClose: () => void
                   value={rewriteText} onChange={(e) => setRewriteText(e.target.value)} />
                 <button className="btn" onClick={rewrite}>↻ Rewrite with AI</button>
                 <button className="btn" onClick={regenMedia}>🖼 Regenerate media</button>
+                {detail.content_type === "video" && (
+                  <Link className="btn" to={`/editor/${detail.id}`}
+                    title="Trim clips, nudge captions, tweak audio before posting">
+                    ✂️ Open in editor
+                  </Link>
+                )}
               </div>
             )}
 

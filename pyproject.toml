@@ -37,7 +37,8 @@ media = [
     "fal-client>=0.5",           # Video generation via fal.ai
     "moviepy>=2.0",              # Video composition
     "ffmpeg-python>=0.2",        # FFmpeg wrapper
-    "whisper-timestamped>=1.0",  # Word-level caption timestamps
+    "whisper-timestamped>=1.0",  # Word-level caption timestamps (legacy fallback)
+    "faster-whisper>=1.0",       # Forced-alignment word timing (primary caption path)
 ]
 posting = [
     "upload-post>=2.2",          # Unified social posting SDK
@@ -46,11 +47,25 @@ trends = [
     "pytrends>=4.9",             # Google Trends
     "beautifulsoup4>=4.12",      # HTML parsing for trend scrapers
 ]
+# Clip-economy templates: sourcing + downloading external clips.
+clips = [
+    "yt-dlp>=2024.1",            # Twitch/YouTube clip downloads (livestream, recap owned-footage)
+]
+# Identity-lock QC gate for the AI ambassador (embeddings only, never face-swap).
+identity = [
+    "insightface>=0.7",
+    "onnxruntime>=1.17",
+    "opencv-python-headless>=4.9",
+]
+# Sharper transient detection for the SFX engine (numpy fallback works without it).
+sfx = [
+    "librosa>=0.10",
+]
 dev = [
     "pytest>=8.0",
 ]
 all = [
-    "mark[media,posting,trends,dev]",
+    "mark[media,posting,trends,clips,identity,sfx,dev]",
 ]
 
 [project.scripts]

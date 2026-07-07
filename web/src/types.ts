@@ -332,6 +332,116 @@ export const PLATFORM_LABELS: Record<string, string> = {
   pinterest: "Pinterest",
 };
 
+/* ------------------------------------------------------------------ *
+ * EDL — the edit decision list the clip/caption editor reads and writes.
+ * Mirrors src/mark/media/edl.py (Pydantic). Clips use the "in" alias.
+ * ------------------------------------------------------------------ */
+export interface EdlCanvas {
+  width: number;
+  height: number;
+  fps: number;
+  background: string;
+}
+export interface EdlWindow { x: number; y: number; w: number; h: number; }
+export interface EdlTransition { type: "crossfade"; duration: number; }
+export interface EdlClip {
+  id: string;
+  src: string;
+  in: number;
+  out: number;
+  order: number;
+  fit: "cover" | "contain" | "window";
+  window?: EdlWindow | null;
+  speed: number;
+  mute: boolean;
+  transition?: EdlTransition | null;
+}
+export interface EdlOverlay {
+  kind: "png" | "text";
+  src?: string | null;
+  text?: string | null;
+  t0: number;
+  t1: number;
+  x?: number | null;
+  y?: number | null;
+  y_frac?: number | null;
+  style?: string | null;
+}
+export interface EdlCaptionWord {
+  w: string;
+  t0: number;
+  t1: number;
+  emphasize?: boolean;
+  emoji?: string | null;
+}
+export interface EdlCaptionEvent { text: string; t0: number; t1: number; }
+export interface EdlCaptions {
+  mode: "karaoke" | "static_scene" | "seam_band" | "none";
+  style: string;
+  words: EdlCaptionWord[];
+  events: EdlCaptionEvent[];
+}
+export interface EdlAudioTrack {
+  src?: string | null;
+  kind: "voiceover" | "music" | "original" | "sfx";
+  gain_db: number;
+  duck_db?: number | null;
+  t0: number;
+  label?: string | null;
+}
+export interface Edl {
+  version: number;
+  ai_generated: boolean;
+  canvas: EdlCanvas;
+  clips: EdlClip[];
+  overlays: EdlOverlay[];
+  captions: EdlCaptions;
+  audio: EdlAudioTrack[];
+}
+
+/** A caption style preset (config/caption_styles/*.yaml) as the editor sees it. */
+export interface CaptionStyle {
+  id: string;
+  font?: string;
+  font_size?: number;
+  primary_color?: string;    // ASS &HAABBGGRR (BGR!)
+  highlight_color?: string;
+  outline_color?: string;
+  outline?: number;
+  uppercase?: boolean;
+  chunk_size?: number;
+  y_frac?: number;
+  seam_y_frac?: number;
+  [k: string]: unknown;
+}
+
+export interface FontRef { family: string; url: string; file: string; }
+
+export interface EditData {
+  content_id: number;
+  platform: string;
+  content_type: string;
+  status: string;
+  edl: Edl;
+  media_urls: { proxy: string | null; master: string | null; video: string | null };
+  audio_url: string | null;
+  styles: CaptionStyle[];
+  fonts: FontRef[];
+  sfx_available: boolean;
+}
+
+/** One entry in the SFX library (Contract 7). Empty list = engine not shipped. */
+export interface SfxItem {
+  slug: string;
+  name: string;
+  category?: string | null;
+  purpose?: string | null;
+  duration?: number | null;
+  gain_db?: number;
+  src?: string | null;
+  url?: string | null;
+}
+
 /** A copyworthy humor sighting from the humor radar (memes, GIFs, formats). */
 export interface HumorFind {
   id: number;

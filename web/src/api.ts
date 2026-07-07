@@ -35,6 +35,21 @@ export const api = {
   del: <T>(path: string) => req<T>(path, { method: "DELETE" }),
 };
 
+// Clip/caption editor (EDL) helpers.
+import type { Edl, EditData, SfxItem } from "./types";
+
+export const editor = {
+  load: (id: number | string) => api.get<EditData>(`/api/edit/${id}`),
+  save: (id: number | string, edl: Edl) =>
+    api.post<{ ok: boolean; edl_path: string }>(`/api/edit/${id}`, edl),
+  proxy: (id: number | string) =>
+    api.post<{ job_id: string }>(`/api/edit/${id}/proxy`),
+  render: (id: number | string) =>
+    api.post<{ job_id: string }>(`/api/edit/${id}/render`),
+  sfx: () => api.get<SfxItem[]>("/api/sfx"),
+  job: (jobId: string) => api.get<{ status: string; progress: number; message: string; result: unknown; error: string | null }>(`/api/jobs/${jobId}`),
+};
+
 export type MarkEvent = { kind: string; ts: string; [k: string]: unknown };
 
 /** Subscribe to the server event stream. Returns an unsubscribe function. */
