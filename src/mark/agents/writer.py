@@ -38,16 +38,21 @@ def write_content(
     character: Optional[dict] = None,
     bandit_picks: Optional[dict] = None,
     qa_out: Optional[dict] = None,
+    taste: str = "",
+    experiment: Optional[dict] = None,
 ) -> ContentDraft:
     winner_examples = winner_examples or []
     qa_out = qa_out if qa_out is not None else {}
     system = prompts.writer_system(product, platform, plan, winner_examples,
-                                   strategy=strategy, episode=episode, character=character)
+                                   strategy=strategy, episode=episode, character=character,
+                                   taste=taste)
     user = prompts.writer_user(plan)
     if user_feedback:
         user += prompts.writer_feedback_section(user_feedback)
     if novelty_similar:
         user += prompts.writer_novelty_nudge(novelty_similar)
+    if experiment:
+        user += prompts.experiment_section(experiment)
 
     n_variants = max(1, int(app.settings.llm.variants))
     drafts = []
@@ -64,7 +69,8 @@ def write_content(
     if len(drafts) == 1:
         draft = drafts[0]
     else:
-        draft, verdict = _judge(app, llm, product, platform, drafts, content_id)
+        draft, verdict = _judge(app, llm, product, platform, drafts, content_id,
+                                taste=taste)
         # QA evidence persists on the content row — graduated autonomy reads it.
         qa_out.update({"hook_strength": verdict.hook_strength,
                        "brand_fit": verdict.brand_fit,
@@ -95,9 +101,9 @@ def write_content(
 # Variant judging
 # --------------------------------------------------------------------------- #
 def _judge(app: App, llm: LLM, product: dict, platform: str, drafts: list[ContentDraft],
-           content_id) -> tuple[ContentDraft, JudgeVerdict]:
+           content_id, taste: str = "") -> tuple[ContentDraft, JudgeVerdict]:
     verdict = llm.parse(
-        prompts.judge_system(product, platform),
+        prompts.judge_system(product, platform, taste=taste),
         prompts.judge_user(drafts),
         JudgeVerdict,
         model=app.settings.llm.judge_model,

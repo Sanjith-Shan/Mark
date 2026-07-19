@@ -50,6 +50,35 @@ export const editor = {
   job: (jobId: string) => api.get<{ status: string; progress: number; message: string; result: unknown; error: string | null }>(`/api/jobs/${jobId}`),
 };
 
+// Owner review feed + taste learning.
+import type { ReviewFeedItem, ReviewAccount, ReviewInsights, Review } from "./types";
+
+export interface ReviewSubmit {
+  rating?: number;
+  feedback?: string;
+  action?: "approve" | "reject";
+  watch_seconds?: number;
+  video_duration?: number;
+  replays?: number;
+  completed?: boolean;
+}
+
+export const review = {
+  feed: (campaign?: string, kind: "video" | "all" = "video") =>
+    api.get<ReviewFeedItem[]>(
+      `/api/review/feed?kind=${kind}${campaign ? `&campaign=${campaign}` : ""}`),
+  // keepalive: pass true for flushes fired from pagehide/visibilitychange —
+  // iOS suspends the page right after those events and cancels plain fetches.
+  submit: (contentId: number, body: ReviewSubmit, opts?: { keepalive?: boolean }) =>
+    req<{ review: Review; job_id: string | null; status: string }>(
+      `/api/review/${contentId}`,
+      { method: "POST", body: JSON.stringify(body), keepalive: opts?.keepalive }),
+  account: (productId: string) =>
+    api.get<ReviewAccount>(`/api/review/account/${productId}`),
+  insights: (campaign?: string) =>
+    api.get<ReviewInsights>(`/api/review/insights${campaign ? `?campaign=${campaign}` : ""}`),
+};
+
 export type MarkEvent = { kind: string; ts: string; [k: string]: unknown };
 
 /** Subscribe to the server event stream. Returns an unsubscribe function. */

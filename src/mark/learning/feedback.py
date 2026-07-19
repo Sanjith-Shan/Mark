@@ -214,6 +214,23 @@ def run(app: App, llm: LLM, product: dict, days: int = 7, collect: bool = True) 
     db_module.insert(app.conn, "insights", product_id=product_id,
                      payload=json.dumps(insights.model_dump()))
 
+    # Owner-taste maintenance: conclude ripe creative experiments, let the
+    # scientist take an investigation step, and age out stale taste lessons.
+    taste_report: dict = {}
+    try:
+        from .. import scientist as scientist_mod
+        from .. import taste as taste_mod
+
+        sci = scientist_mod.run(app, llm, product, force=True) or {}
+        retired = taste_mod.decay_stale_lessons(app, product_id)
+        taste_report = {"scientist": sci.get("notebook_entry"),
+                        "experiments_opened": len(sci.get("opened", [])),
+                        "experiments_concluded": len(sci.get("concluded", [])),
+                        "stale_lessons_retired": retired}
+    except Exception as exc:  # taste channel must never break the loop
+        db_module.log_activity(app.conn, "learn", f"taste maintenance failed: {exc}",
+                               product_id=product_id, level="error")
+
     lift = holdout_lift(app, product_id)
 
     report = {
@@ -224,6 +241,7 @@ def run(app: App, llm: LLM, product: dict, days: int = 7, collect: bool = True) 
         "total_winners": winners.count(app, product_id),
         "media_pruned": pruned,
         "sentiment": sentiment_summary,
+        "taste": taste_report,
         "holdout_lift": lift,
         "insights": insights.model_dump(),
         "ran_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),

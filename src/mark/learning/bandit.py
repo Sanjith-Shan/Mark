@@ -130,16 +130,24 @@ def random_policy(app: App, platform: str, product: Optional[dict] = None,
 
 
 def update(app: App, product_id: str, platform: str, arm_type: str,
-           arm_value: str, reward: float) -> None:
-    """Apply a reward (clamped to [0, 1]) to one arm."""
+           arm_value: str, reward: float, weight: float = 1.0) -> None:
+    """Apply a reward (clamped to [0, 1]) to one arm.
+
+    ``weight`` scales the posterior evidence (pseudo-observation count) — the
+    owner-taste channel uses it so a single rating can carry more or less
+    weight than one audience-engagement observation. pulls/total_reward always
+    move by one observation so avg_reward stays a plain mean.
+    """
     reward = max(0.0, min(float(reward), 1.0))
+    weight = max(0.0, float(weight))
     arm = _get_or_create_arm(app, arm_type, arm_value, platform, product_id)
     pulls = arm["pulls"] + 1
     total = arm["total_reward"] + reward
     db_module.update(
         app.conn, "bandit_arms", arm["id"],
         pulls=pulls, total_reward=total, avg_reward=total / pulls,
-        alpha=arm["alpha"] + reward, beta_param=arm["beta_param"] + (1.0 - reward),
+        alpha=arm["alpha"] + weight * reward,
+        beta_param=arm["beta_param"] + weight * (1.0 - reward),
         updated_at=_now(),
     )
 
@@ -189,7 +197,8 @@ def decay_arms(app: App, product_id: str, gamma: float) -> None:
 
 
 def update_from_content(app: App, content: dict, reward: float,
-                        post_time: Optional[str] = None) -> None:
+                        post_time: Optional[str] = None,
+                        weight: float = 1.0) -> None:
     """Update all arms implied by a posted content row."""
     sctx = db_module.loads(content.get("strategy_context"), {}) or {}
     platform, product_id = content["platform"], content["product_id"]
@@ -205,7 +214,8 @@ def update_from_content(app: App, content: dict, reward: float,
     }
     for arm_type, value in mapping.items():
         if value:
-            update(app, product_id, platform, arm_type, str(value), reward)
+            update(app, product_id, platform, arm_type, str(value), reward,
+                   weight=weight)
 
 
 def leaderboard(app: App, product_id: str, platform: Optional[str] = None) -> list[dict]:

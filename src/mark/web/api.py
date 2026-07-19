@@ -1040,6 +1040,286 @@ def build_router(rt: Runtime) -> APIRouter:
         return out
 
     # ------------------------------------------------------------------ #
+    # Review feed (mobile) + owner-taste learning
+    # ------------------------------------------------------------------ #
+    def _character_out(app, character_id: Optional[int]) -> Optional[dict]:
+        if not character_id:
+            return None
+        row = db_module.query_one(app.conn, "SELECT * FROM characters WHERE id = ?",
+                                  (character_id,))
+        if not row:
+            return None
+        img = media_url(row["reference_image"]) if row["reference_image"] else None
+        return {"id": row["id"], "name": row["name"], "role": row["role"],
+                "image": img}
+
+    def _review_item(app, row: dict, campaigns_by_id: dict) -> dict:
+        out = content_out(row)
+        sctx = out.get("strategy_context") or {}
+        campaign = campaigns_by_id.get(row["product_id"]) or {}
+        from .. import taste as taste_mod
+
+        out["campaign"] = {
+            "id": row["product_id"],
+            "name": campaign.get("name") or row["product_id"],
+            "kind": campaign.get("kind") or "product",
+            "upload_profile": campaign.get("upload_profile"),
+        }
+        out["character"] = _character_out(app, sctx.get("character_id"))
+        out["experiment"] = sctx.get("experiment")
+        out["review"] = taste_mod.get_review(app, row["id"])
+        return out
+
+    @r.get("/review/feed")
+    def review_feed(campaign: Optional[str] = None, kind: str = "video",
+                    limit: int = 50) -> list[dict]:
+        """The phone feed: unposted drafts/approved content with media, soonest-
+        scheduled first, then freshest. kind="video" (default) or "all"."""
+        app = rt.app()
+        campaigns_by_id = {p["id"]: dict(p) for p in store.list_products(app.conn)}
+        where = ["c.status IN ('draft', 'approved')",
+                 "c.media_paths IS NOT NULL", "c.media_paths != '[]'"]
+        params: list[Any] = []
+        if kind == "video":
+            where.append("c.content_type = 'video'")
+        if campaign:
+            where.append("c.product_id = ?")
+            params.append(campaign)
+        rows = db_module.query(
+            app.conn,
+            f"""
+            SELECT c.* FROM content c
+            WHERE {' AND '.join(where)}
+            ORDER BY c.scheduled_at IS NULL, c.scheduled_at, c.created_at DESC
+            LIMIT ?
+            """, params + [int(limit)])
+        return [_review_item(app, dict(row), campaigns_by_id) for row in rows]
+
+    @r.get("/review/account/{product_id}")
+    def review_account(product_id: str) -> dict:
+        """The tap-into-the-account profile view: campaign identity, its
+        characters, and its past + upcoming posts like a profile grid."""
+        app = rt.app()
+        product = get_product_or_404(product_id)
+        campaigns_by_id = {product_id: dict(product)}
+        rows = db_module.query(
+            app.conn,
+            """
+            SELECT c.* FROM content c
+            WHERE c.product_id = ? AND c.media_paths IS NOT NULL
+              AND c.media_paths != '[]' AND c.status != 'rejected'
+            ORDER BY CASE c.status WHEN 'posted' THEN 1 ELSE 0 END,
+                     COALESCE(c.posted_at, c.scheduled_at, c.created_at) DESC
+            LIMIT 60
+            """, (product_id,))
+        items = []
+        for row in rows:
+            item = _review_item(app, dict(row), campaigns_by_id)
+            post = db_module.query_one(
+                app.conn, "SELECT id FROM posts WHERE content_id = ? "
+                          "ORDER BY posted_at DESC LIMIT 1", (row["id"],))
+            item["latest_metric"] = store.latest_metric(app.conn, post["id"]) if post else None
+            items.append(item)
+        chars = [dict(c) for c in db_module.query(
+            app.conn, "SELECT * FROM characters WHERE product_id = ? AND active = 1",
+            (product_id,))]
+        for c in chars:
+            c["image"] = media_url(c["reference_image"]) if c.get("reference_image") else None
+            c.pop("reference_image", None)
+        stats = db_module.query_one(
+            app.conn,
+            """
+            SELECT (SELECT COUNT(*) FROM posts p JOIN content c ON c.id = p.content_id
+                    WHERE c.product_id = ?) AS posts,
+                   (SELECT AVG(rating) FROM reviews WHERE product_id = ? AND rating IS NOT NULL)
+                    AS avg_rating,
+                   (SELECT COUNT(*) FROM reviews WHERE product_id = ? AND rating IS NOT NULL)
+                    AS rated
+            """, (product_id, product_id, product_id))
+        return {"campaign": product_out(product), "characters": chars,
+                "stats": dict(stats) if stats else {}, "items": items}
+
+    class ReviewIn(BaseModel):
+        rating: Optional[int] = Field(default=None, ge=1, le=10)
+        feedback: Optional[str] = None
+        action: Optional[str] = None          # "approve" | "reject"
+        watch_seconds: Optional[float] = None
+        video_duration: Optional[float] = None
+        replays: Optional[int] = None
+        completed: Optional[bool] = None
+
+    @r.post("/review/{content_id}")
+    def submit_review(content_id: int, body: ReviewIn) -> dict:
+        """Everything the phone does lands here — rating slide, note, approve/
+        reject, watch telemetry. Persisted immediately; learning runs as a
+        background job and streams its takeaways over SSE."""
+        from datetime import datetime, timezone
+
+        from .. import taste as taste_mod
+
+        app = rt.app()
+        row = get_content_or_404(content_id)
+        if body.action and body.action not in ("approve", "reject"):
+            raise HTTPException(400, "action must be approve or reject")
+
+        review, first_rating = taste_mod.record_review(
+            app, row, rating=body.rating, feedback=body.feedback,
+            action=body.action, watch_seconds=body.watch_seconds,
+            video_duration=body.video_duration, replays=body.replays,
+            completed=body.completed)
+
+        # Apply the approval decision through the same paths the Studio uses.
+        if body.action == "approve" and row["status"] != "posted":
+            now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            if row.get("expires_at") and str(row["expires_at"]) <= now:
+                raise HTTPException(400, "trend window closed — reject it instead")
+            already = row["status"] == "approved"
+            store.set_content_status(app.conn, content_id, "approved", approved_at=now)
+            db_module.log_activity(app.conn, "approve",
+                                   f"Approved content #{content_id} (review app)",
+                                   product_id=row["product_id"], content_id=content_id,
+                                   level="success")
+            if not already:
+                from .. import characters as characters_mod
+
+                try:
+                    characters_mod.on_content_approved(app, row)
+                except Exception:
+                    pass
+            rt.bus.publish("content", {"id": content_id, "status": "approved"})
+        elif body.action == "reject" and row["status"] != "posted":
+            # The note also lands in rejection_feedback so the writer's legacy
+            # "don't repeat this" path keeps working.
+            store.set_content_status(app.conn, content_id, "rejected",
+                                     rejection_feedback=(body.feedback or "").strip() or None)
+            db_module.log_activity(app.conn, "reject",
+                                   f"Rejected content #{content_id} (review app)",
+                                   product_id=row["product_id"], content_id=content_id)
+            rt.bus.publish("content", {"id": content_id, "status": "rejected"})
+
+        # Learning job — only when there's a new signal worth processing.
+        job_id = None
+        has_note = bool((body.feedback or "").strip())
+        if first_rating or has_note:
+            note = (body.feedback or "").strip() or None
+
+            def _run(app, llm, job, report):
+                from .. import scientist as scientist_mod
+                from .. import taste as taste_mod2
+
+                report(0.2, "Interpreting your feedback…")
+                out = taste_mod2.process_review(app, llm, content_id,
+                                                new_rating=first_rating,
+                                                new_feedback=note)
+                product = store.get_product(app.conn, row["product_id"])
+                report(0.7, "Scientist checking experiments…")
+                sci = None
+                try:
+                    sci = scientist_mod.run(app, llm, product)
+                except Exception:
+                    sci = None
+                if sci and sci.get("notebook_entry"):
+                    out["learned"].append(f"Scientist: {sci['notebook_entry']}")
+                rt.bus.publish("review", {"content_id": content_id,
+                                          "learned": out["learned"]})
+                return out
+
+            job = rt.jobs.submit("learn", f"Learn from review #{content_id}", _run,
+                                 product_id=row["product_id"])
+            job_id = job.id
+
+        return {"review": taste_mod.get_review(app, content_id), "job_id": job_id,
+                "status": store.get_content(app.conn, content_id)["status"]}
+
+    @r.get("/review/insights")
+    def review_insights(campaign: Optional[str] = None) -> dict:
+        """Everything the Taste dashboard shows: the rating trend, each reviewed
+        video with what the AI took away, the taste profile, the experiment lab,
+        and the scientist's notebook."""
+        from .. import scientist as scientist_mod
+        from .. import taste as taste_mod
+
+        app = rt.app()
+        campaigns_by_id = {p["id"]: dict(p) for p in store.list_products(app.conn)}
+        where = "WHERE r.product_id = ?" if campaign else ""
+        params: list[Any] = [campaign] if campaign else []
+        review_rows = db_module.query(
+            app.conn,
+            f"""
+            SELECT r.*, c.caption, c.hook, c.platform AS c_platform, c.content_type,
+                   c.media_paths, c.status, c.strategy_context, c.product_id AS c_product
+            FROM reviews r JOIN content c ON c.id = r.content_id
+            {where} ORDER BY r.updated_at DESC LIMIT 60
+            """, params)
+        reviews = []
+        for row in review_rows:
+            d = dict(row)
+            media = []
+            for p in db_module.loads(d.pop("media_paths"), []) or []:
+                url = media_url(p)
+                if url:
+                    kind = "video" if p.endswith((".mp4", ".mov", ".webm")) else "image"
+                    media.append({"url": url, "kind": kind})
+            sctx = db_module.loads(d.pop("strategy_context"), {}) or {}
+            learning = db_module.query_one(
+                app.conn, "SELECT payload, created_at FROM review_learnings "
+                          "WHERE content_id = ? ORDER BY created_at DESC LIMIT 1",
+                (d["content_id"],))
+            campaign_row = campaigns_by_id.get(d["product_id"]) or {}
+            reviews.append({
+                **d, "media": media,
+                "campaign_name": campaign_row.get("name") or d["product_id"],
+                "strategy": sctx.get("strategy"), "experiment": sctx.get("experiment"),
+                "learning": db_module.loads(learning["payload"], {}) if learning else None,
+                "learned_at": learning["created_at"] if learning else None,
+            })
+
+        lessons_where = "WHERE product_id = ?" if campaign else ""
+        lessons = [dict(x) for x in db_module.query(
+            app.conn,
+            f"SELECT id, product_id, aspect, polarity, directive, scope_platform, "
+            f"scope_strategy, scope_content_type, confidence, support, contradictions, "
+            f"status, retired_reason, updated_at, created_at FROM taste_lessons "
+            f"{lessons_where} ORDER BY status = 'retired', confidence DESC LIMIT 80",
+            params)]
+
+        exp_where = "WHERE product_id = ?" if campaign else ""
+        experiments = []
+        for x in db_module.query(
+                app.conn,
+                f"SELECT * FROM creative_experiments {exp_where} "
+                f"ORDER BY status = 'concluded', started_at DESC LIMIT 30", params):
+            exp = scientist_mod._exp_out(x)
+            exp["stats"] = scientist_mod.variant_stats(app, exp)
+            experiments.append(exp)
+
+        nb_where = "WHERE product_id = ?" if campaign else ""
+        notebook = [dict(x) for x in db_module.query(
+            app.conn,
+            f"SELECT * FROM lab_notebook {nb_where} ORDER BY created_at DESC LIMIT 25",
+            params)]
+        for n in notebook:
+            n["payload"] = db_module.loads(n.get("payload"), {})
+
+        totals = db_module.query_one(
+            app.conn,
+            f"""
+            SELECT COUNT(rating) AS rated, AVG(rating) AS avg_rating,
+                   AVG(CASE WHEN COALESCE(rated_at, created_at) >=
+                       datetime('now', '-14 days') THEN rating END) AS avg_rating_14d
+            FROM reviews {'WHERE product_id = ?' if campaign else ''}
+            """, params)
+        return {
+            "trend": taste_mod.rating_trend(app, campaign),
+            "reviews": reviews,
+            "lessons": lessons,
+            "experiments": experiments,
+            "notebook": notebook,
+            "aspects": taste_mod.aspect_report(app, campaign) if campaign else [],
+            "totals": dict(totals) if totals else {},
+        }
+
+    # ------------------------------------------------------------------ #
     # Jobs / events / autopilot
     # ------------------------------------------------------------------ #
     @r.get("/jobs")

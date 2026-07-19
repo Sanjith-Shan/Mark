@@ -261,7 +261,8 @@ def strategist_system(product: dict, platform: str, trends: list[dict],
                       allowed_types: list[str], strategy=None, episode: int = 1,
                       forced_trend: Optional[dict] = None,
                       character_comments: Optional[list[str]] = None,
-                      insights: Optional[list[str]] = None) -> str:
+                      insights: Optional[list[str]] = None,
+                      taste: str = "") -> str:
     strat = strategy_block(strategy, platform, episode)
     strat_brief = f"\nSTRATEGY BRIEF: {strategy.strategist_brief}" if strategy and strategy.strategist_brief else ""
     knowledge = knowledge_block(product, strategy)
@@ -288,7 +289,7 @@ def strategist_system(product: dict, platform: str, trends: list[dict],
     from . import rating as rating_mod
 
     return f"""You are a world-class social media strategist for {product['name']}.
-{strat}{strat_brief}{knowledge}{mined}{learned}{forced}
+{strat}{strat_brief}{knowledge}{mined}{learned}{taste}{forced}
 
 {product_block(product)}
 {rating_mod.guidance_block(product, platform)}
@@ -331,7 +332,8 @@ def strategist_user(platform: str) -> str:
 # Writer
 # --------------------------------------------------------------------------- #
 def writer_system(product: dict, platform: str, plan, winner_examples: list[dict],
-                  strategy=None, episode: int = 1, character: Optional[dict] = None) -> str:
+                  strategy=None, episode: int = 1, character: Optional[dict] = None,
+                  taste: str = "") -> str:
     trend = plan.trend_tie_in or "none"
     strat = strategy_block(strategy, platform, episode)
     strat_brief = f"\nSTRATEGY BRIEF: {strategy.writer_brief}" if strategy and strategy.writer_brief else ""
@@ -345,7 +347,7 @@ def writer_system(product: dict, platform: str, plan, winner_examples: list[dict
     return f"""You are an elite copywriter creating a {plan.content_type} for {platform}.
 
 {COMMANDMENTS}
-{strat}{strat_brief}{media_brief}{examples}{knowledge}{char}
+{strat}{strat_brief}{media_brief}{examples}{knowledge}{char}{taste}
 
 {product_block(product)}
 {rating_mod.guidance_block(product, platform)}
@@ -599,10 +601,10 @@ def guess_check_system() -> str:
             "Predict how it ends: write 3 different plausible final lines. Just predict "
             "the most likely endings — do not try to be funny.")
 
-def judge_system(product: dict, platform: str) -> str:
+def judge_system(product: dict, platform: str, taste: str = "") -> str:
     return f"""You are a ruthless creative director judging draft social posts for
 {product['name']} on {platform}. Brand voice: {product['brand_voice']}.
-
+{taste}
 Score each draft on hook_strength, brand_fit, and scroll_stopping power (0-10).
 Penalize generic marketing slop heavily. {ANTI_SLOP}
 
@@ -667,3 +669,134 @@ def analyzer_user(performance_table: str, sentiment_summary: str) -> str:
     return (f"POST PERFORMANCE (last period):\n{performance_table}\n\n"
             f"AUDIENCE SENTIMENT:\n{sentiment_summary}\n\n"
             "Produce the structured insights now.")
+
+
+# --------------------------------------------------------------------------- #
+# Owner-taste interpreter (taste.py)
+# --------------------------------------------------------------------------- #
+def taste_interpreter_system(product: dict) -> str:
+    from .constants import TASTE_ASPECTS
+
+    return f"""You interpret the owner's review of ONE draft video for {product['name']}
+and extract what the content system should learn from it.
+
+The owner rates drafts 1-10 and sometimes leaves a note. Your job is CREDIT
+ASSIGNMENT: attribute the reaction to specific creative attributes, never to a
+whole category. "I hated this" on a motivational video must become something
+like "the voiceover delivery was flat" or "the hook took 4 seconds to land" —
+NOT "stop making motivational videos". Killing categories is forbidden; naming
+fixable attributes is the job.
+
+Rules:
+- Each signal names exactly ONE aspect from: {', '.join(TASTE_ASPECTS)}.
+- `directive` is an imperative the writer/media pipeline can follow next time
+  ("Open with the punchline, not context", "Cut all silences over 0.5s").
+- Generalize only what the owner's words actually support. A one-off nitpick
+  ("typo in slide 3") gets generalizable=false.
+- Scope narrowly ONLY when the owner clearly scoped it ("on LinkedIn...", "these
+  cat videos..."); otherwise leave scopes null so the lesson applies broadly.
+- polarity "prefer" for things the owner praised, "avoid" for complaints.
+- severity: how strongly the owner feels (their language + the rating).
+- If the note raises a genuine either/or question worth an A/B test, put it in
+  experiment_worthy as one sentence; otherwise leave it null.
+- Empty/ambiguous notes → few or zero signals. Never invent."""
+
+
+def taste_interpreter_user(content: dict, review: dict, sctx: dict,
+                           note: Optional[str] = None) -> str:
+    watch = ""
+    if review.get("video_duration"):
+        pct = 100 * (review.get("watch_seconds") or 0) / max(review["video_duration"], 1e-9)
+        watch = (f"\nWATCH TELEMETRY: watched {min(pct, 100):.0f}% "
+                 f"({review.get('replays') or 0} replays, "
+                 f"{'finished it' if review.get('completed') else 'did not finish'})")
+    draft = content.get("draft") or {}
+    if isinstance(draft, str):
+        import json as _json
+        try:
+            draft = _json.loads(draft)
+        except Exception:
+            draft = {}
+    script = (draft.get("script") or "")[:600]
+    # Only the NEW note is evidence — earlier notes were already turned into
+    # lessons; re-presenting them as fresh input would double-count support.
+    new_note = (note or review.get("feedback") or "").strip()
+    all_notes = (review.get("feedback") or "").strip()
+    prior = ""
+    if note and all_notes and all_notes != new_note:
+        earlier = all_notes.replace(new_note, "").strip()
+        if earlier:
+            prior = (f"\nEARLIER NOTES (already processed into lessons — context "
+                     f"only, do NOT extract signals from these): {earlier[:400]}")
+    return f"""THE DRAFT BEING REVIEWED ({content['platform']} {content['content_type']}):
+HOOK: {content.get('hook') or ''}
+CAPTION: {(content.get('caption') or '')[:400]}
+{f'SCRIPT: {script}' if script else ''}
+CREATIVE CHOICES: strategy={sctx.get('strategy')}, hook_style={sctx.get('hook_style')}, \
+tone={sctx.get('tone')}, emotion={sctx.get('emotional_target')}, \
+humor={sctx.get('humor_mechanism')}
+
+THE OWNER'S REVIEW:
+RATING: {review.get('rating') if review.get('rating') is not None else 'not rated'} / 10
+NOTE (interpret THIS): {new_note or '(none)'}{prior}{watch}
+
+Extract the signals now."""
+
+
+# --------------------------------------------------------------------------- #
+# Scientist (scientist.py) — plans creative experiments
+# --------------------------------------------------------------------------- #
+def scientist_system(product: dict) -> str:
+    from .constants import TASTE_ASPECTS
+
+    return f"""You are the resident creative scientist for {product['name']}'s content
+system. The owner rates every draft video 1-10 in a review app; your ONLY goal
+is to make those ratings trend upward by finding out — experimentally — what
+the owner actually likes.
+
+You run attribute-level A/B experiments. Each experiment varies EXACTLY ONE
+aspect (from: {', '.join(TASTE_ASPECTS)}) across 2-3 variants; each variant is a
+concrete directive the writer will follow. Ratings accumulate per variant and
+the system concludes automatically once every variant has enough samples.
+
+Doctrine:
+- A low-rated lane is a DIAGNOSIS PROBLEM, not a kill order. Design the
+  experiment that isolates whether the problem is execution (pacing, hook,
+  voiceover...) before anyone gives up on a category.
+- Vary one thing. If two attributes are suspect, that's two experiments.
+- Variants must be genuinely different and each plausibly best — no strawmen.
+- Don't test what the evidence already answers; don't retest a concluded
+  question unless the data shifted.
+- Respect the sample budget: only a few drafts get rated per day, so open an
+  experiment only when the question is worth ~6-10 rated drafts. It is
+  perfectly good science to propose NOTHING this run.
+- Abandon experiments that events made moot. Retire lessons the rating data now
+  contradicts (retire_lesson_ids).
+- notebook_entry is your memory: state where the investigation stands, what
+  you're waiting on, and what you'll look at next. Your previous entries are
+  provided — build on them, never restart from zero."""
+
+
+def scientist_user(evidence: dict, notebook_entries: list[dict]) -> str:
+    import json as _json
+
+    nb = "\n".join(f"[{e['created_at']}] {e['entry']}"
+                   for e in reversed(notebook_entries)) or "(first run — empty)"
+    return f"""YOUR LAB NOTEBOOK (oldest first):
+{nb}
+
+CURRENT EVIDENCE (owner ratings are the target metric):
+{_json.dumps(evidence, indent=1, default=str)[:6000]}
+
+Decide your next investigation step and return the structured plan."""
+
+
+# --------------------------------------------------------------------------- #
+# Experiment variant injection (writer prompt)
+# --------------------------------------------------------------------------- #
+def experiment_section(assignment: dict) -> str:
+    return (f"\n\nACTIVE EXPERIMENT — this draft is variant “{assignment['variant']}” "
+            f"of a controlled test on {assignment.get('aspect', 'a creative choice')} "
+            f"(hypothesis: {assignment.get('hypothesis', '')}).\n"
+            f"VARIANT DIRECTIVE (follow it faithfully — a half-applied variant "
+            f"poisons the measurement): {assignment['directive']}")

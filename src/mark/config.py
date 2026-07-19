@@ -131,6 +131,16 @@ class LearningConfig(_Base):
     reward_maturity_hours: int = 48     # a post is rewarded once, after this age
     min_baseline_posts: int = 3         # measured posts a platform needs before rewards flow
     strategy_prior_strength: float = 4.0  # pseudo-observations encoding research mix weights
+    # Owner-taste channel (mobile review feed → learning). The owner's rating is
+    # available pre-posting and reflects taste directly, so it gets its own
+    # weighted reward path alongside audience engagement.
+    human_reward_weight: float = 1.0    # bandit pseudo-observations per owner rating
+    taste_max_lessons: int = 12         # active lessons injected per prompt (top-confidence)
+    taste_merge_threshold: float = 0.86 # cosine ≥ this = same lesson (support += 1)
+    max_active_experiments: int = 3     # concurrent creative experiments per campaign
+    experiment_min_samples: int = Field(3, ge=1)  # rated samples per variant before concluding
+    experiment_margin: float = 1.0      # mean-rating gap (1..10 scale) to declare a winner
+    scientist_min_new_reviews: int = 3  # reviews since last run before the scientist re-runs
 
 
 class TrendsConfig(_Base):

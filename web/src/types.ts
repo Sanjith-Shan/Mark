@@ -442,6 +442,139 @@ export interface SfxItem {
   url?: string | null;
 }
 
+/* ------------------------------------------------------------------ *
+ * Owner review feed + taste learning (taste.py / scientist.py)
+ * ------------------------------------------------------------------ */
+export interface Review {
+  id: number;
+  content_id: number;
+  product_id: string;
+  platform: string;
+  rating: number | null;
+  feedback: string | null;
+  action: string | null; // "approve" | "reject" | null
+  watch_seconds: number;
+  video_duration: number;
+  replays: number;
+  completed: number;
+  rated_at: string | null;
+  created_at: string;
+  updated_at: string | null;
+}
+
+export interface ExperimentTag { id: number; variant: string; aspect: string | null }
+
+export interface ReviewFeedItem extends Content {
+  campaign: { id: string; name: string; kind: string; upload_profile: string | null };
+  character: { id: number; name: string; role: string; image: string | null } | null;
+  experiment: ExperimentTag | null;
+  review: Review | null;
+  latest_metric?: Metric | null;
+}
+
+export interface ReviewAccount {
+  campaign: Campaign;
+  characters: { id: number; name: string; role: string; image: string | null }[];
+  stats: { posts: number; avg_rating: number | null; rated: number };
+  items: ReviewFeedItem[];
+}
+
+export interface TasteLesson {
+  id: number;
+  product_id: string;
+  aspect: string;
+  polarity: "avoid" | "prefer";
+  directive: string;
+  scope_platform: string | null;
+  scope_strategy: string | null;
+  scope_content_type: string | null;
+  confidence: number;
+  support: number;
+  contradictions: number;
+  status: "active" | "retired";
+  retired_reason: string | null;
+  updated_at: string | null;
+  created_at: string;
+}
+
+export interface CreativeVariantStats {
+  generated: number;
+  n: number;
+  mean_rating: number | null;
+  mean_reward: number | null;
+}
+
+export interface CreativeExperiment {
+  id: number;
+  product_id: string;
+  aspect: string | null;
+  hypothesis: string;
+  variants: { key: string; directive: string }[];
+  scope_platform: string | null;
+  scope_strategy: string | null;
+  scope_content_type: string | null;
+  min_samples: number;
+  assignments: Record<string, number>;
+  rationale: string | null;
+  status: "running" | "concluded" | "abandoned";
+  winner: string | null;
+  conclusion: string | null;
+  started_at: string;
+  ended_at: string | null;
+  stats: Record<string, CreativeVariantStats>;
+}
+
+export interface LabNote {
+  id: number;
+  product_id: string;
+  entry: string;
+  payload: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface ReviewedRow {
+  id: number;
+  content_id: number;
+  product_id: string;
+  platform: string;
+  rating: number | null;
+  feedback: string | null;
+  action: string | null;
+  watch_seconds: number;
+  video_duration: number;
+  replays: number;
+  completed: number;
+  rated_at: string | null;
+  updated_at: string | null;
+  caption: string | null;
+  hook: string | null;
+  content_type: string;
+  status: string;
+  media: { url: string; kind: "image" | "video" }[];
+  campaign_name: string;
+  strategy: string | null;
+  experiment: ExperimentTag | null;
+  /** interpreter output: {summary, signals[], experiment_worthy?} */
+  learning: {
+    summary?: string;
+    signals?: { aspect: string; polarity: string; directive: string; severity?: number }[];
+    experiment_worthy?: string | null;
+  } | null;
+  learned_at: string | null;
+}
+
+export interface RatingTrendPoint { week: string; week_start: string; avg_rating: number; n: number }
+
+export interface ReviewInsights {
+  trend: RatingTrendPoint[];
+  reviews: ReviewedRow[];
+  lessons: TasteLesson[];
+  experiments: CreativeExperiment[];
+  notebook: LabNote[];
+  aspects: { dimension: string; value: string; avg_rating: number; n: number }[];
+  totals: { rated: number; avg_rating: number | null; avg_rating_14d: number | null };
+}
+
 /** A copyworthy humor sighting from the humor radar (memes, GIFs, formats). */
 export interface HumorFind {
   id: number;

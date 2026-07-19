@@ -44,3 +44,23 @@ EMOTIONAL_TARGETS = [
 # The discrete choices the bandit optimizes.
 ARM_TYPES = ["hook_style", "content_type", "tone", "post_time", "strategy",
              "humor_mechanism", "humor_persona", "emotional_target"]
+
+# Attribute vocabulary for owner-taste credit assignment (taste.py). A bad
+# rating is never attributed to a whole category — it's attributed to one or
+# more of these aspects, which is what keeps the system from throwing away a
+# content lane because one execution detail missed.
+TASTE_ASPECTS = [
+    "hook",        # opening line / first-second grab
+    "pacing",      # cut speed, dead air, how fast it moves
+    "voiceover",   # TTS voice, energy, delivery
+    "visuals",     # b-roll, image quality, composition
+    "captions",    # burned-in caption style/timing/size
+    "humor",       # joke quality, comedic mechanism
+    "topic",       # subject matter choice
+    "angle",       # the take/framing on the topic
+    "cta",         # call-to-action wording/placement
+    "audio",       # music/SFX choice and mix
+    "length",      # too long / too short
+    "style",       # overall aesthetic/voice/brand feel
+    "other",
+]

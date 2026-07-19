@@ -459,14 +459,22 @@ Local web app (`mark web`), pages:
   the drafted comment replies (editable, one-tap "mark posted"/skip, sensitive
   ones flagged amber).
 - **Learn** — insights, the bandit leaderboard (which choices are winning).
+- **Taste** — what the system learned from the OWNER: the rating trend from
+  the phone review feed, the taste-lesson profile, the creative experiment
+  lab, and the scientist's notebook.
 - **Autopilot** — the master switch + upcoming scheduled runs.
 - **Settings** — models, humor engine knobs, trend-reaction knobs (including
   the auto-react toggle), approval policy, spend tracking.
 
+There's also **/review** — a full-screen, installable PWA feed for the phone:
+swipe through every queued video TikTok-style, hold-to-rate 1-10,
+approve/reject, leave notes; watch time is measured passively. Everything it
+captures feeds the owner-taste learning channel (`taste.py`/`scientist.py`).
+
 There's also a full CLI (`mark generate`, `mark react`, `mark strategies`,
 `mark character sync`, etc.) for scripting.
 
-A **guided tour** (27 steps) walks every page and explains the whole machine —
+A **guided tour** (31 steps) walks every page and explains the whole machine —
 start it from the "Tutorial" button at the bottom of the sidebar or from
 Settings → Tutorial; ← → keys navigate, Esc exits.
 

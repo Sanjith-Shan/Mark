@@ -11,3 +11,11 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     </BrowserRouter>
   </React.StrictMode>,
 );
+
+// PWA: makes /review installable from the phone's share menu ("Add to Home
+// Screen"). Registered only on built bundles — the dev server has no sw.js.
+if ("serviceWorker" in navigator && import.meta.env.PROD) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  });
+}

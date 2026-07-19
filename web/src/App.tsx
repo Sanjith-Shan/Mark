@@ -11,6 +11,8 @@ import Learn from "./pages/Learn";
 import Autopilot from "./pages/Autopilot";
 import Settings from "./pages/Settings";
 import Editor from "./pages/Editor";
+import Review from "./pages/Review";
+import Taste from "./pages/Taste";
 import { Pill } from "./components/ui";
 import { api } from "./api";
 
@@ -32,6 +34,7 @@ const I = {
   bolt: icon('<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>'),
   gear: icon('<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>'),
   book: icon('<path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/>'),
+  star: icon('<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>'),
 };
 
 const NAV = [
@@ -42,6 +45,7 @@ const NAV = [
   { to: "/trends", label: "Trends", icon: I.fire },
   { to: "/playbook", label: "Playbook", icon: I.book },
   { to: "/learn", label: "Learn", icon: I.brain },
+  { to: "/taste", label: "Taste", icon: I.star },
   { to: "/autopilot", label: "Autopilot", icon: I.bolt },
   { to: "/settings", label: "Settings", icon: I.gear },
 ];
@@ -49,7 +53,7 @@ const NAV = [
 const TITLES: Record<string, string> = {
   "/": "Dashboard", "/campaigns": "Campaigns", "/studio": "Content Studio",
   "/analytics": "Analytics", "/trends": "Trends", "/playbook": "Playbook",
-  "/learn": "What's working",
+  "/learn": "What's working", "/taste": "Taste — what Mark learned from you",
   "/autopilot": "Autopilot", "/settings": "Settings",
   "/editor": "Clip Editor",
 };
@@ -74,6 +78,9 @@ function Shell() {
   const { status } = useGlobal();
   const loc = useLocation();
   const drafts = status?.counts?.draft ?? 0;
+
+  // The phone review feed is its own full-screen surface — no sidebar chrome.
+  if (loc.pathname.startsWith("/review")) return <Review />;
 
   return (
     <div className="shell">
@@ -119,6 +126,7 @@ function Shell() {
               <Route path="/trends" element={<Trends />} />
               <Route path="/playbook" element={<Playbook />} />
               <Route path="/learn" element={<Learn />} />
+              <Route path="/taste" element={<Taste />} />
               <Route path="/autopilot" element={<Autopilot />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/editor/:contentId" element={<Editor />} />

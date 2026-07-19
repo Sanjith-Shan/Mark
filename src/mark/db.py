@@ -278,6 +278,102 @@ CREATE TABLE IF NOT EXISTS experiments (
     ended_at TIMESTAMP
 );
 
+-- Owner reviews from the mobile review feed. ONE row per content item — the
+-- latest state of the owner's judgment (rating slider, free-text note, watch
+-- telemetry). Append-only history isn't needed; the learnings table is the
+-- audit trail of what the AI extracted from each submission.
+CREATE TABLE IF NOT EXISTS reviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content_id INTEGER NOT NULL UNIQUE REFERENCES content(id),
+    product_id TEXT NOT NULL,
+    platform TEXT NOT NULL,
+    rating INTEGER,                    -- 1..10 from the hold-to-rate slider (NULL = not rated yet)
+    feedback TEXT,                     -- free-text note from the owner
+    action TEXT,                       -- last explicit action: "approve" | "reject" | NULL
+    watch_seconds REAL DEFAULT 0,      -- cumulative seconds the owner watched
+    video_duration REAL DEFAULT 0,     -- clip length, for watch-through %
+    replays INTEGER DEFAULT 0,         -- times the owner looped it
+    completed INTEGER DEFAULT 0,       -- watched to the end at least once
+    rated_at TIMESTAMP,                -- when the rating was (last) set
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_reviews_product ON reviews(product_id, updated_at);
+
+-- What the AI learned from each review submission (interpreter output). This is
+-- the per-video "what it took away" shown in the Taste dashboard.
+CREATE TABLE IF NOT EXISTS review_learnings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    review_id INTEGER NOT NULL REFERENCES reviews(id),
+    content_id INTEGER NOT NULL,
+    product_id TEXT NOT NULL,
+    payload TEXT NOT NULL,             -- JSON ReviewInterpretation (summary, aspect signals)
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_review_learnings_content ON review_learnings(content_id);
+
+-- The persistent taste profile: evidence-weighted directives distilled from the
+-- owner's ratings/feedback. Injected into strategist/writer/judge prompts.
+-- Confidence rises with repeated support and falls on contradiction; lessons
+-- retire instead of being deleted (the history explains the system's behavior).
+CREATE TABLE IF NOT EXISTS taste_lessons (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id TEXT NOT NULL,
+    aspect TEXT NOT NULL,              -- hook/pacing/voiceover/visuals/captions/humor/topic/cta/audio/length/style/other
+    polarity TEXT DEFAULT 'avoid',     -- "avoid" | "prefer"
+    directive TEXT NOT NULL,           -- imperative sentence fed to the prompts
+    scope_platform TEXT,               -- NULL = all platforms
+    scope_strategy TEXT,               -- NULL = all strategies
+    scope_content_type TEXT,           -- NULL = all content types
+    confidence REAL DEFAULT 0.3,       -- support / (support + contradictions + 1)
+    support INTEGER DEFAULT 1,         -- times new evidence agreed
+    contradictions INTEGER DEFAULT 0,  -- times new evidence disagreed
+    status TEXT DEFAULT 'active',      -- "active" | "retired"
+    retired_reason TEXT,
+    source_review_ids TEXT,            -- JSON: review ids that produced/updated it
+    embedding BLOB,                    -- directive embedding (dedup via cosine)
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP,
+    last_evidence_at TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_taste_lessons_product ON taste_lessons(product_id, status);
+
+-- Creative experiments: attribute-level A/B tests the scientist runs to isolate
+-- WHY something under/over-performs with the owner. Variants are directives
+-- injected into generation; assignment is round-robin and recorded in
+-- strategy_context so ratings can be attributed per variant.
+CREATE TABLE IF NOT EXISTS creative_experiments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id TEXT NOT NULL,
+    aspect TEXT,                       -- the ONE attribute being varied
+    hypothesis TEXT NOT NULL,          -- what the scientist believes and is testing
+    variants TEXT NOT NULL,            -- JSON [{key, directive}]
+    scope_platform TEXT,               -- NULL = all platforms
+    scope_strategy TEXT,
+    scope_content_type TEXT,
+    min_samples INTEGER DEFAULT 3,     -- rated samples per variant before concluding
+    assignments TEXT,                  -- JSON {variant_key: generation_count}
+    rationale TEXT,                    -- why the scientist opened this experiment
+    status TEXT DEFAULT 'running',     -- "running" | "concluded" | "abandoned"
+    winner TEXT,                       -- winning variant key (NULL = no difference)
+    conclusion TEXT,                   -- plain-language takeaway
+    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    ended_at TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_creative_exp_product ON creative_experiments(product_id, status);
+
+-- The scientist's lab notebook — its long-term memory. The last N entries are
+-- fed back into every scientist run so decisions build on prior context, and
+-- the Taste dashboard renders it as the "what the AI is thinking" timeline.
+CREATE TABLE IF NOT EXISTS lab_notebook (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id TEXT NOT NULL,
+    entry TEXT NOT NULL,               -- plain-language state of the investigation
+    payload TEXT,                      -- JSON ScientistPlan (actions taken this run)
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_lab_notebook_product ON lab_notebook(product_id, created_at);
+
 -- First-class series bookkeeping (franchise compounding is the growth asset).
 CREATE TABLE IF NOT EXISTS series (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

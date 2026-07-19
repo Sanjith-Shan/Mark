@@ -228,14 +228,51 @@ def generate_one(app: App, llm: LLM, product: dict, platform: str,
         except Exception:
             character_comments = []
 
+    # Owner taste profile — the standing directives distilled from the owner's
+    # ratings/notes in the review app. Injected everywhere a creative choice is
+    # made (strategist, writer, judge).
+    from . import taste as taste_mod
+
+    taste_block = ""
+    try:
+        taste_block = taste_mod.prompt_block(app, product, platform,
+                                             strategy_id=strategy.id if strategy else None)
+    except Exception:
+        taste_block = ""
+
     plan = strategist.plan_content(
         app, llm, product, platform,
         trends=ctx["trends"], winners=ctx["winners"], bandit_picks=ctx["bandit_picks"],
         strategy=strategy, episode=episode, forced_trend=forced_trend,
         character_comments=character_comments, insights=ctx.get("insights"),
+        taste=taste_block,
     )
     if forced_trend and not plan.trend_tie_in:
         plan.trend_tie_in = forced_trend.get("topic")
+
+    # Creative experiment assignment — if the scientist has a running A/B test
+    # matching this slot, this draft becomes one sample of one variant.
+    experiment = None
+    try:
+        from . import scientist as scientist_mod
+
+        experiment = scientist_mod.assign_variant(
+            app, product, platform,
+            strategy.id if strategy else None, plan.content_type)
+    except Exception:
+        experiment = None
+
+    # Re-derive the taste block now that the plan fixed the content_type —
+    # lessons scoped to a specific type ("these carousels…") only apply once
+    # the type is known; the writer and judge must see them.
+    writer_taste = taste_block
+    try:
+        writer_taste = taste_mod.prompt_block(
+            app, product, platform,
+            strategy_id=strategy.id if strategy else None,
+            content_type=plan.content_type)
+    except Exception:
+        writer_taste = taste_block
 
     examples = winner_examples(app, llm, product, platform, plan)
     feedback = recent_rejection_feedback(app, product, platform)
@@ -243,7 +280,8 @@ def generate_one(app: App, llm: LLM, product: dict, platform: str,
     draft = writer.write_content(app, llm, product, platform, plan,
                                  winner_examples=examples, user_feedback=feedback,
                                  strategy=strategy, episode=episode, character=character,
-                                 bandit_picks=ctx["bandit_picks"], qa_out=qa)
+                                 bandit_picks=ctx["bandit_picks"], qa_out=qa,
+                                 taste=writer_taste, experiment=experiment)
 
     # Novelty guard — one regeneration attempt with a "make it different" nudge.
     novelty = check_novelty(app, llm, product, platform, draft)
@@ -253,7 +291,8 @@ def generate_one(app: App, llm: LLM, product: dict, platform: str,
                                      winner_examples=examples, user_feedback=feedback,
                                      novelty_similar=novelty.similar_caption,
                                      strategy=strategy, episode=episode, character=character,
-                                     bandit_picks=ctx["bandit_picks"], qa_out=qa)
+                                     bandit_picks=ctx["bandit_picks"], qa_out=qa,
+                                     taste=writer_taste, experiment=experiment)
         novelty = check_novelty(app, llm, product, platform, draft)
     qa["novelty_max_sim"] = round(novelty.max_sim, 4)
     qa["novelty_ok"] = novelty.ok
@@ -273,6 +312,9 @@ def generate_one(app: App, llm: LLM, product: dict, platform: str,
         "forced_trend": forced_trend.get("topic") if forced_trend else None,
         "humor_mechanism": draft.humor_mechanism,
         "humor_persona": draft.humor_persona,
+        # Experiment tag — ratings on this draft count toward this variant.
+        "experiment": ({"id": experiment["id"], "variant": experiment["variant"],
+                        "aspect": experiment["aspect"]} if experiment else None),
     }
 
     # Save the draft FIRST (spec: content is always reviewable; also gives us an id

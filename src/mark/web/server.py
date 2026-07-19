@@ -25,6 +25,34 @@ def create_app(home: Optional[Path] = None, force_mock: bool = False) -> FastAPI
     app = FastAPI(title="Mark", docs_url="/api/docs", openapi_url="/api/openapi.json")
     app.state.runtime = rt
 
+    # Optional access token so the app can be exposed beyond localhost (the
+    # phone review feed). Set MARK_WEB_TOKEN and open any page once with
+    # ?token=<value> — a long-lived cookie takes over from there (EventSource
+    # and <video> can't send custom headers, so cookie auth is the mechanism).
+    import os
+
+    token = (os.environ.get("MARK_WEB_TOKEN") or "").strip()
+    if token:
+        @app.middleware("http")
+        async def _token_gate(request, call_next):
+            auth_header = (request.headers.get("authorization") or "")
+            # Accept ANY matching credential — if the or-chain instead picked
+            # the first present one, a stale cookie from a rotated token would
+            # permanently shadow a correct ?token= and lock the device out.
+            candidates = (request.query_params.get("token"),
+                          request.cookies.get("mark_token"),
+                          auth_header.removeprefix("Bearer ").strip())
+            if not any(c == token for c in candidates if c):
+                resp = JSONResponse({"detail": "unauthorized — open with ?token=…"},
+                                    status_code=401)
+                resp.delete_cookie("mark_token")  # clear stale cookie on rotation
+                return resp
+            response = await call_next(request)
+            if request.query_params.get("token") == token:
+                response.set_cookie("mark_token", token, max_age=180 * 24 * 3600,
+                                    httponly=True, samesite="lax")
+            return response
+
     app.include_router(build_router(rt))
 
     # Generated media (images/videos) straight off disk.

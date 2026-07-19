@@ -26,12 +26,15 @@ export const TOUR_STEPS: TourStep[] = [
   },
   {
     route: "/", target: ".sidebar", pageLabel: "Navigation",
-    title: "The nine rooms of the house",
+    title: "The ten rooms of the house",
     body: "Dashboard (overview) → Campaigns (what you're marketing) → Studio (review what Mark "
       + "wrote) → Analytics (how posts performed) → Trends (what's hot right now) → Playbook "
-      + "(the content strategies + characters) → Learn (what the system has learned) → "
+      + "(the content strategies + characters) → Learn (what the system learned from the "
+      + "audience) → Taste (what it learned from YOU — your ratings from the phone feed) → "
       + "Autopilot (the on/off switch for full autonomy) → Settings."
-      + "\n\nThe badge on Studio counts drafts waiting for your review.",
+      + "\n\nThe badge on Studio counts drafts waiting for your review. There's also an "
+      + "eleventh room that isn't in this sidebar: /review, the full-screen phone feed — the "
+      + "tour explains it when we reach Taste.",
   },
   {
     route: "/", target: "[data-tour='providers']", pageLabel: "Topbar",
@@ -235,11 +238,54 @@ export const TOUR_STEPS: TourStep[] = [
   {
     route: "/learn", target: "[data-tour='learn-experiments']", pageLabel: "Learn",
     title: "The A/B test lab",
-    body: "Experiments compare campaigns as variants: run two accounts with different themes, "
-      + "ratings, or strategy mixes, and this table shows posts, engagement, and rewards per "
-      + "variant with a leader. This is the summer plan — several test accounts per platform, "
-      + "each an experiment, until the system has evolved on real data before you point it at "
-      + "a real business.",
+    body: "Experiments here compare whole campaigns as variants: run two accounts with "
+      + "different themes, ratings, or strategy mixes, and this table shows posts, engagement, "
+      + "and rewards per variant with a leader. This is the summer plan — several test "
+      + "accounts per platform, each an experiment, until the system has evolved on real data "
+      + "before you point it at a real business."
+      + "\n\n(There's a second, finer-grained kind of experiment — creative A/B tests on "
+      + "single attributes like pacing or hook length — and those live on the next page: "
+      + "Taste.)",
+  },
+
+  // --------------------------------------------------------------- taste --
+  {
+    route: "/taste", target: "[data-tour='taste-trend']", pageLabel: "Taste",
+    title: "The other teacher: you",
+    body: "The Learn page is what the AUDIENCE taught Mark; this page is what YOU taught it. "
+      + "Open /review on your phone (add it to your home screen — it installs like a real "
+      + "app) and you get a TikTok-style feed of every video queued to post: swipe through "
+      + "them, hold the ★ button and slide to rate 1-10, ✓ approve, ✕ reject, 💬 leave a "
+      + "note. It even measures your watch time quietly."
+      + "\n\nThis chart is the scoreboard for the whole channel: your average rating per "
+      + "week. Mark's job is to make this line climb."
+      + "\n\n(Phone access: run `mark web --host 0.0.0.0` with MARK_WEB_TOKEN set, and open "
+      + "the URL once with ?token=… on your phone.)",
+  },
+  {
+    route: "/taste", target: "[data-tour='taste-lessons']", pageLabel: "Taste",
+    title: "Notes become standing rules",
+    body: "Every rating updates the same learned preferences as real engagement, and every "
+      + "note you write gets interpreted into an attribute-level lesson: \"I hated this\" "
+      + "becomes \"the voiceover was flat\" or \"the hook took too long\" — never \"stop "
+      + "making this category\". Killing categories is forbidden by design; naming fixable "
+      + "details is the job."
+      + "\n\nLessons live here with confidence bars: repeated agreement strengthens them, "
+      + "contradiction weakens and eventually retires them, and stale ones fade. The active "
+      + "ones are injected into every future draft — the strategist, the writer, and the "
+      + "judge all see your taste profile before a single word is written.",
+  },
+  {
+    route: "/taste", target: "[data-tour='taste-experiments']", pageLabel: "Taste",
+    title: "The scientist and its lab notebook",
+    body: "A resident scientist runs controlled experiments ON you: each one varies exactly "
+      + "ONE thing (pacing, hook length, voiceover energy…) across 2-3 variants, new drafts "
+      + "get assigned to variants automatically, and your ratings accumulate per variant. "
+      + "Winners are decided by the numbers — enough samples plus a real rating gap — and a "
+      + "winning variant becomes a permanent preference."
+      + "\n\nBelow the experiments is the lab notebook: the scientist's own running memory of "
+      + "what it's investigating, what it concluded, and what it's waiting on. Reviewed "
+      + "videos on the left show what the AI took away from each of your ratings and notes.",
   },
 
   // ----------------------------------------------------------- autopilot --
@@ -297,6 +343,9 @@ export const TOUR_STEPS: TourStep[] = [
     body: "Suggested first hour: create a campaign (or run `mark onboard`), hit Generate on the "
       + "Dashboard, review your drafts in Studio, approve a few, Post + Collect analytics, then "
       + "run the learning loop and watch the Learn page light up — all free, all offline."
+      + "\n\nThen grab your phone: open /review, swipe through the queue, hold-to-rate a few "
+      + "videos and leave a note — and watch the Taste page fill in with what Mark learned "
+      + "from you."
       + "\n\nRestart this tour any time from right here. When you're ready for real accounts: "
       + "add the three API keys and flip Autopilot on.",
   },

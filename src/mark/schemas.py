@@ -178,6 +178,64 @@ class GuessCheck(BaseModel):
     completions: list[str] = Field(default_factory=list)
 
 
+# --------------------------------------------------------------------------- #
+# Owner-taste learning (taste.py) + creative experiments (scientist.py)
+# --------------------------------------------------------------------------- #
+class AspectSignal(BaseModel):
+    """One attribute-level takeaway extracted from an owner review.
+
+    The whole point is credit assignment: "I hated this video" must become
+    "the voiceover pacing was too slow", never "motivational videos are bad"."""
+
+    aspect: str = "other"          # one of constants.TASTE_ASPECTS
+    polarity: str = "avoid"        # "avoid" | "prefer"
+    directive: str = ""            # imperative, generalizable ("Cut hooks to under 6 words")
+    scope_platform: Optional[str] = None      # only if the owner scoped it
+    scope_strategy: Optional[str] = None      # strategy id, only if clearly specific
+    scope_content_type: Optional[str] = None
+    severity: float = 0.5          # 0..1 — how strongly the owner feels
+    generalizable: bool = True     # False = one-off nitpick, don't add to the profile
+
+
+class ReviewInterpretation(BaseModel):
+    """Interpreter output — what the AI learned from one review submission."""
+
+    summary: str = ""              # one sentence: what the owner is really saying
+    signals: list[AspectSignal] = Field(default_factory=list)
+    experiment_worthy: Optional[str] = None   # an open question worth an A/B test
+
+
+class ExperimentVariant(BaseModel):
+    key: str = ""                  # short slug, e.g. "fast_cuts"
+    directive: str = ""            # injected into the writer prompt for this variant
+
+
+class ExperimentProposal(BaseModel):
+    """Scientist output — a new attribute-level A/B test to open."""
+
+    aspect: str = "other"
+    hypothesis: str = ""           # what we believe and what would confirm it
+    variants: list[ExperimentVariant] = Field(default_factory=list)  # 2-3, vary ONE thing
+    scope_platform: Optional[str] = None
+    scope_strategy: Optional[str] = None
+    scope_content_type: Optional[str] = None
+    rationale: str = ""            # the evidence that motivated this test
+
+
+class ExperimentAbandon(BaseModel):
+    experiment_id: int = 0
+    reason: str = ""
+
+
+class ScientistPlan(BaseModel):
+    """Scientist output — one investigation step, grounded in the lab notebook."""
+
+    notebook_entry: str = ""       # plain-language state of the investigation
+    proposals: list[ExperimentProposal] = Field(default_factory=list)
+    abandon: list[ExperimentAbandon] = Field(default_factory=list)
+    retire_lesson_ids: list[int] = Field(default_factory=list)  # lessons the data now contradicts
+
+
 class SentimentResult(BaseModel):
     sentiment: str = "neutral"     # "positive", "negative", "neutral"
     score: float = 0.0             # -1..1

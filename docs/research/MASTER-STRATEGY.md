@@ -920,3 +920,45 @@ content-strategy source of truth; these extend WHERE it can be applied):
    3 consecutive sub-baseline episodes retire a series and propose a fresh
    premise. **Knowledge self-refresh** mines comments/trends into the
    specificity bank and pain veins weekly (fact base stays human-verified).
+
+## Addendum (July 8, 2026) — the owner-taste channel (mobile review + creative experiments)
+
+The learning loop gained a second reward signal: the OWNER. Audience engagement
+takes days and needs volume; the owner rates every draft in seconds, before it
+posts. Both signals now move the same machinery.
+
+**Surfaces.** A PWA review feed at `/review` (install to home screen; served by
+`mark web --host 0.0.0.0` + `MARK_WEB_TOKEN` for phone access, Tailscale
+recommended) — TikTok-style vertical swipe through everything queued, with
+hold-to-rate 1-10, approve/reject, free-text notes, and passive watch
+telemetry. A "Taste" tab in the web app shows the rating trend, every review
+with what the AI took away, the taste profile, the experiment lab, and the
+scientist's notebook.
+
+**Three learning channels per review** (src/mark/taste.py, scientist.py):
+
+1. **Reward** — rating→(r-1)/9 credited ONCE per content item to the same
+   bandit arms engagement rewards hit (weight `learning.human_reward_weight`).
+   5-6 straddles the 0.5 baseline so the two channels share one scale.
+2. **Taste profile** — an interpreter LLM does attribute-level credit
+   assignment over a fixed aspect vocabulary (hook/pacing/voiceover/…,
+   constants.TASTE_ASPECTS). Doctrine: "I hated this" must become "the
+   voiceover was flat", never "kill this category". Directives merge into
+   `taste_lessons` (embedding-deduped; support/contradiction counters;
+   retire at 2+ contradictions ≥ support; stale lessons decay weekly) and the
+   top lessons are injected into the strategist, writer, AND variant-judge
+   prompts as the OWNER TASTE PROFILE block.
+3. **Experiments** — a scientist LLM runs attribute-level A/B tests: each
+   varies EXACTLY ONE aspect across 2-3 directive variants, assigned
+   round-robin at generation (tagged in `strategy_context.experiment`).
+   Conclusions are computed in code, never vibes: min `experiment_min_samples`
+   ratings per variant, winner iff mean-rating gap ≥ `experiment_margin`;
+   winners become durable "prefer" lessons. The scientist's lab notebook is
+   its cross-run memory — every run reads its own prior entries, so
+   investigations continue instead of restarting.
+
+**Balance guarantee.** A terrible rating can never delete a lane: rewards are
+proportional, lessons are aspect-scoped, experiments exist precisely to
+separate execution from category, and bandit decay re-opens anything the
+owner's taste drifts back toward. The target metric for the whole channel is
+the owner's rating trend (Taste tab) — it should climb.
